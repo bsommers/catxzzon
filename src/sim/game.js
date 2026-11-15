@@ -1,4 +1,4 @@
-// CATXZZON simulation core (sim-core). Pure deterministic JS: no DOM, no Math.random, no wall clock.
+// CATXZZON simulation core (sim-core). Pure deterministic JS: no DOM, no unseeded randomness, no wall clock.
 import { KINDS, TUNING, VIEW, FIELD_W, FIELD_CELLS_Z, CELL, POPUP_COLORS } from '../core/defs.js';
 import { createRng } from '../core/rng.js';
 import { createBus } from '../core/events.js';

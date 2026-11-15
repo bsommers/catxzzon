@@ -129,7 +129,7 @@ export function buildFortress(stageIdx, round, seed, def) {
     const d = diff(cy);
     const w = pickW(d), h = rng.int(2, 3) - (d > 0.6 && rng.chance(0.5) ? 1 : 0);
     const g = pickGap(cy, w, Math.max(1, h));
-    const H = wallH([g], rng.int(3, 7));
+    const H = wallH([g], rng.int(3, 6));
     const capped = wallRow(cy, H, [g], rng.chance(capChance(H, d)));
     holeFlank(cy, g);
     if (!capped) topTurrets(cy, H, rng.int(0, 1 + Math.floor(d * 2)), rng.chance(0.12));
@@ -147,7 +147,7 @@ export function buildFortress(stageIdx, round, seed, def) {
     for (let i = 0; i < n; i++) {
       const r = cy + i * s;
       const g = pickGap(r, rng.int(2, 3 - (d > 0.7 ? 1 : 0)), rng.int(2, 3), { bx: sign });
-      const H = wallH([g], rng.int(5, 7));
+      const H = wallH([g], rng.int(4, 6));
       const capped = wallRow(r, H, [g], rng.chance(capChance(H, d)));
       if (!capped) topTurrets(r, H, rng.int(0, 1), false);
       commit(g, r);
@@ -326,20 +326,20 @@ export function buildFortress(stageIdx, round, seed, def) {
   // ---------- compose ----------
   breather(0, startCy, false);
   let cy = startCy;
-  const BUDGET = 5300;
-  while (cy < endCy - 12) {
+  const BUDGET = 4200;
+  while (cy < endCy - 34) {
     const d = diff(cy);
     let name = chooseSeg(d);
     if (b.map.size > BUDGET) name = 'single';
     lastSeg = name;
     cy = SEGS[name][0](cy);
-    const gap = Math.max(2, rng.int(3, 7) - Math.floor(d * 2.5));
+    const gap = Math.max(2, rng.int(4, 8) - Math.floor(d * 2.5)) + (b.map.size > 3600 ? 3 : 0);
     breather(cy, gap, false);
     cy += gap;
   }
   // finale: a set-piece gate then a run-out
-  if (cy < endCy - 2) { cy = gate(cy); breather(cy, 3, false); cy += 3; }
-  if (cy < endCy - 2) { cy = zig(cy); }
+  if (cy < endCy - 6) { cy = gate(cy); breather(cy, 3, false); cy += 3; }
+  if (cy < endCy - 28 && b.map.size < 4600) { cy = zig(cy); }
   breather(Math.min(cy, rows - 12), 8, false);
 
   // ---------- post passes ----------
@@ -347,26 +347,35 @@ export function buildFortress(stageIdx, round, seed, def) {
   // ground spawns must not sit inside voxels
   b.spawns = sp.filter((s) => !((s.kind === 'turret' || s.kind === 'pad' || s.kind === 'tuna' || s.kind === 'radar') && (s.z || 0) === 0 &&
     (b.has(Math.floor(s.x / CELL), Math.floor(s.y / CELL), 0) || b.has(Math.floor(s.x / CELL), Math.floor(s.y / CELL), 1))));
-  const clearRow = (r) => {
-    for (let k = 0; k < 60; k++) {
-      for (const q of [r + k, r - k]) if (q > 2 && q < rows - 2 && !used.has(q) && !used.has(q - 1) && !used.has(q + 1)) return q;
+  const isClear = (q) => q > 2 && q < rows - 2 && !used.has(q) && !used.has(q - 1) && !used.has(q + 1);
+  const clearRow = (r, lo, hi) => {
+    for (let k = 0; k < 80; k++) {
+      for (const q of [r - k, r + k]) if (q >= lo && q <= hi && isClear(q)) return q;
     }
-    return r;
+    return -1;
   };
   // tuna every <= ~650 units
   for (let guard = 0; guard < 40; guard++) {
     const ys = b.spawns.filter((s) => s.kind === 'tuna').map((s) => s.y).sort((p, q) => p - q);
     ys.push(def.length);
     let prev = 0, ins = -1;
-    for (const y of ys) { if (y - prev > 640) { ins = prev + 520; break; } prev = y; }
+    for (const y of ys) { if (y - prev > 680) { ins = prev + 560; break; } prev = y; }
     if (ins < 0) break;
-    const r = clearRow(Math.floor(ins / CELL));
+    const r = clearRow(Math.floor(ins / CELL), Math.floor((prev + 100) / CELL), Math.floor((prev + 660) / CELL));
+    if (r < 0) {   // dense stretch: settle for any unused row
+      let q = -1;
+      for (let k = 0; k < 40 && q < 0; k++) for (const c of [Math.floor(ins / CELL) - k, Math.floor(ins / CELL) + k]) if (q < 0 && c * CELL > prev + 60 && c * CELL < prev + 680 && !used.has(c)) q = c;
+      if (q < 0) break;
+      b.spawn(yc(q), 'tuna', rng.int(24, 200), 0);
+      continue;
+    }
     b.spawn(yc(r), 'tuna', rng.int(24, 200), 0);
   }
   // pickups every ~1200
   const picks = ['yarnpick', 'nip', 'laserpick'];
   for (let k = 0, y = 900; y < def.length - 400; k++, y += 1150 + rng.int(0, 100)) {
-    const r = clearRow(Math.floor(y / CELL));
+    const r0 = Math.floor(y / CELL);
+    const r = clearRow(r0, r0 - 40, r0 + 40) < 0 ? r0 : clearRow(r0, r0 - 40, r0 + 40);
     b.spawn(yc(r), picks[k % 3], rng.int(40, 184), rng.int(24, 80));
   }
   // ground decals

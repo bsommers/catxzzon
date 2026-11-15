@@ -1,7 +1,7 @@
 // Art module `cat` (owner: art-cat): Major Marmalade's ship, portraits, shots and pickups.
 // Pure & deterministic. The 3D-ish sprites (ship, portrait) are rendered with a tiny orthographic SDF ray-marcher
 // into quantised 4-tone ramps, then outlined; small items are drawn directly with PixBuf primitives.
-import { PixBuf, ink, hash2, mix, shade } from './pixbuf.js';
+import { PixBuf, ink, hash2, mix } from './pixbuf.js';
 
 const OUT = '#1a1420';
 
@@ -392,14 +392,14 @@ function hairball(f) {
   const p = new PixBuf(10, 12), cx = 5, cy = 4.5;
   // glow trail below
   for (let y = 8; y < 12; y++) {
-    const a = Math.round(200 - (y - 8) * 45), wdt = y < 10 ? 1 : 0;
+    const a = Math.round(235 - (y - 8) * 50), wdt = y < 10 ? 1 : 0;
     for (let x = cx - wdt - 1; x <= cx + wdt; x++) p.set(x, y, ink(FLAME[y < 10 ? 1 : 2], { emit: 1, a }));
   }
   const rot = f * Math.PI / 4;
   for (let y = 0; y < 9; y++)
     for (let x = 0; x < 10; x++) {
       const dx = x + 0.5 - cx, dy = y + 0.5 - cy, r = Math.hypot(dx, dy), ang = Math.atan2(dy, dx);
-      const fuzz = 3.3 + 0.8 * hash2(Math.round((ang + rot) * 2.5), 7, f);
+      const fuzz = 3.7 + 0.9 * hash2(Math.round((ang + rot) * 2.5), 7, f);
       if (r > fuzz) continue;
       const lit = (-dx - dy) / 4 + 0.2;
       const swirl = Math.sin(ang * 2 + rot * 2 + r * 1.4) > 0.5;
@@ -494,9 +494,9 @@ function aura(f) {
       const dx = (x + 0.5 - cx) / 26, dy = (y + 0.5 - cy) / 21, r = Math.hypot(dx, dy), ang = Math.atan2(dy, dx);
       const edge = 0.92 + 0.06 * Math.sin(ang * 7 + f * 1.57);
       if (r > edge || r < 0.45) continue;
-      const band = Math.floor((r * 9 - f * 0.5 + ang * 0.0) % 6 + 6) % 6;
+      const band = Math.floor(((r - 0.45) * 12 + 6) % 6);
       const fade = 1 - Math.abs(r - 0.72) / 0.3;
-      const a = Math.round(clamp(fade, 0, 1) * 170 + 20);
+      const a = Math.round(clamp(fade, 0, 1) * 200 + 30);
       p.set(x, y, ink(hues[(band + f) % 6], { emit: 1, a }));
     }
   for (let i = 0; i < 6; i++) {
@@ -521,4 +521,3 @@ export function build() {
     cat_aura: [0, 1, 2, 3].map(aura),
   };
 }
-export { shade };

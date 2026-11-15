@@ -125,7 +125,8 @@ test('yarn bomb: radius damage, boss takes 10, bombs counted, edge-triggered', (
     { y: 330, kind: 'turret', x: 112, z: 120 }] }) });
   toPlay(g);
   // place everything right ahead of the shell's burst point
-  for (const e of g.ents) e.y = g.player.y + 150;
+  for (const e of g.ents) { e.y = g.player.y + 232; e.z = 18; }
+  g.ents.find((e) => e.kind === 'mousejet').x = 112 + 40;
   g.ents.find((e) => e.z === 120).x = 112 - 200; // out of radius (and field), survives
   const boss = g.ents.find((e) => e.kind === 'boss'); boss.y = g.player.y + 400;
   assert.equal(g.bombs, TUNING.bombs);

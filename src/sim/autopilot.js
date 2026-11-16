@@ -35,13 +35,15 @@ function targetAt(tgt, y) {
 export function createAutopilot(game, opts = {}) {
   const skill = clamp(opts.skill ?? 1, 0, 1);
   const rnd = mulberry(((game && game.seed) | 0) ^ 0x9e3779b9 ^ Math.round(skill * 1000));
+  const unfair = new Set();                // wall rows (cy) where no physically reachable path existed
   const rowCache = new Map(); let cacheStage = null;
   const prev = new Map();                 // ent id -> [x,y,z] last tick (for velocity)
   let lastT = -1, lastScroll = 0, scrollV = TUNING.baseSpeed;
-  let lastMove = MOVES[0], hold = { dx: 0, dz: 0 }, holdN = 0, bombCd = 0, lastTarget = null;
+  let planCache = null, lastMove = MOVES[0], hold = { dx: 0, dz: 0 }, holdN = 0, bombCd = 0, lastTarget = null;
   const reactEvery = 1 + Math.round((1 - skill) * 9);
   const horizon = 0.3 + 0.45 * skill;
   const margin = 1.5 + 2.5 * skill;
+  const planEvery = skill >= 0.95 ? 3 : 2;
   const rowsLook = 1 + Math.round(skill * 5);
 
   // ---------- planning through wall gaps ----------
@@ -152,7 +154,8 @@ export function createAutopilot(game, opts = {}) {
     };
     let K = Math.min(rows.length, rowsLook), chain = null;
     for (; K >= 1 && !chain; K--) chain = solve(K, 0.85) || solve(K, 1.0);
-    if (!chain) {                       // unreachable: head for the nearest free lattice point of the first row
+    if (!chain) {                       // unreachable: record it as an unfair segment
+      unfair.add(rows[0].cy);
       let bd = 1e9, bi = -1;
       for (let q = 0; q < NXS * NZS; q++) {
         if (!rows[0].free[q]) continue;
@@ -243,7 +246,9 @@ export function createAutopilot(game, opts = {}) {
   }
 
   function decide(g, p, dt) {
-    const gap = planGap(g, p);
+    let gap;
+    if (planCache && g.t - planCache.t < planEvery * DT * 0.99 && g.stageIdx === planCache.stage) gap = planCache.gap;
+    else { gap = planGap(g, p); planCache = { t: g.t, gap, stage: g.stageIdx }; }
     let tgt;
     if (gap && gap.dy < 380) tgt = gap;
     else tgt = pickTarget(g, p);
@@ -314,7 +319,7 @@ export function createAutopilot(game, opts = {}) {
     if (prev.size > seen.size + 64) for (const k of prev.keys()) if (!seen.has(k)) prev.delete(k);
   }
 
-  return { input, step: input, update: input, think: input, get skill() { return skill; }, get target() { return lastTarget; } };
+  return { input, step: input, update: input, think: input, get skill() { return skill; }, get target() { return lastTarget; }, get unfairRows() { return [...unfair].sort((a, b) => a - b); } };
 }
 
 export default createAutopilot;

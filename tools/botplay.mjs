@@ -36,7 +36,7 @@ function run(seed) {
     if (g.stageIdx !== stage || g.state === 'stageclear' || g.state === 'victory') { cleared = true; break; }
     if (g.state === 'gameover') break;
   }
-  return { seed, cleared, gameover: g.state === 'gameover', deaths, maxY: Math.round(maxY), score: g.score, time: +g.t.toFixed(1), fuel: Math.round(g.fuel), wall: Date.now() - t0, timeout: !cleared && g.state !== 'gameover' };
+  return { seed, cleared, gameover: g.state === 'gameover', deaths, maxY: Math.round(maxY), unfair: ap.unfairRows, score: g.score, time: +g.t.toFixed(1), fuel: Math.round(g.fuel), wall: Date.now() - t0, timeout: !cleared && g.state !== 'gameover' };
 }
 
 const len = STAGES[stage]?.length ?? 0;
@@ -45,7 +45,7 @@ const results = [];
 for (const s of seeds) {
   const r = run(s); results.push(r);
   const dstr = r.deaths.map((d) => `${d.y}:${d.cause}`).join(' ');
-  console.log(`seed ${String(s).padStart(3)} ${r.cleared ? 'CLEAR' : r.gameover ? 'DEAD ' : 'TIMEOUT'} reach=${Math.min(100, Math.round(100 * r.maxY / len))}% deaths=${r.deaths.length} score=${r.score} t=${r.time}s fuel=${r.fuel} (${r.wall}ms)${dstr ? ' [' + dstr + ']' : ''}`);
+  console.log(`seed ${String(s).padStart(3)} ${r.cleared ? 'CLEAR' : r.gameover ? 'DEAD ' : 'TIMEOUT'} reach=${Math.min(100, Math.round(100 * r.maxY / len))}% deaths=${r.deaths.length} score=${r.score} t=${r.time}s fuel=${r.fuel} (${r.wall}ms)${r.unfair.length ? ' unfair-rows(cy)=' + r.unfair.join(',') : ''}${dstr ? ' [' + dstr + ']' : ''}`);
 }
 const fails = results.filter((r) => !r.cleared).length;
 const hist = new Map();

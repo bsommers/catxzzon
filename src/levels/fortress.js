@@ -47,7 +47,11 @@ export function buildFortress(stageIdx, round, seed, def) {
     }
     return false;
   };
+  const gapRows = [];              // centre of each wall's real gap (tins are lined up with the next one)
+  const tight = [];                // rows needing precise flying (a gap one cell wide or tall): no shooters/rocket pads in their approach
   function wallRow(cy, H, gaps, cap) {
+    for (const g of gaps) if (!g.decoy && (g.w === 1 || g.h === 1)) tight.push(yc(cy));
+    for (const g of gaps) if (!g.decoy) { gapRows.push({ y: yc(cy), x: (g.gx + g.w / 2) * CELL, z: g.gz * CELL, z1: (g.gz + g.h) * CELL }); break; }
     for (let cx = 0; cx < NX; cx++) {
       for (let cz = 0; cz < H; cz++) {
         if (!inGap(gaps, cx, cz)) b.cell(cx, cy, cz, T[bodyType(cx, cz, H)]);
@@ -57,10 +61,8 @@ export function buildFortress(stageIdx, round, seed, def) {
     if (cap && H < NZ) field(cy, 0, NX, H, NZ);
     return cap && H < NZ;
   }
-  const holes = [];                // 1x1 mouse holes: no rocket pads in their approach lane
   function holeFlank(cy, g) {
     if (g.w !== 1 || g.h !== 1) return;
-    holes.push({ y: yc(cy), x: xc(g.gx) });
     if (g.gx > 0 && b.has(g.gx - 1, cy, g.gz)) b.cell(g.gx - 1, cy, g.gz, T.mousehole);
     if (g.gx < NX - 1 && b.has(g.gx + 1, cy, g.gz)) b.cell(g.gx + 1, cy, g.gz, T.mousehole);
   }
@@ -177,6 +179,10 @@ export function buildFortress(stageIdx, round, seed, def) {
     wallRow(cy, H1, [g1], rng.chance(0.5));
     commit(g1, cy);
     const g2 = pickGap(cy + 1, rng.int(1, 2), rng.int(1, 2));
+    // nest the second gap inside the first (a funnel): rows one apart leave no free flight, so no lateral shift may be required
+    g2.w = Math.min(g2.w, g1.w); g2.h = Math.min(g2.h, g1.h);
+    g2.gx = clamp(g2.gx, g1.gx, g1.gx + g1.w - g2.w); g2.gz = clamp(g2.gz, g1.gz, g1.gz + g1.h - g2.h);
+    g2.ax = clamp(g2.ax, g2.gx, g2.gx + g2.w - 1); g2.az = clamp(g2.az, g2.gz, g2.gz + g2.h - 1);
     const H2 = wallH([g2], rng.int(4, 7));
     const c2 = wallRow(cy + 1, H2, [g2], rng.chance(capChance(H2, d)));
     holeFlank(cy + 1, g2);
@@ -203,11 +209,13 @@ export function buildFortress(stageIdx, round, seed, def) {
     const cy2 = cy + rng.int(2, 3);
     if (rng.chance(0.5)) {            // curtain with a vertical slot
       const sw = d < 0.8 || round < 3 ? 2 : 1;
+      if (sw === 1) tight.push(yc(cy2));
       const sx = clamp(S.ax - rng.int(0, sw - 1), 0, NX - sw);
       field(cy2, 0, sx, 0, NZ, rng.chance(0.3) ? 2.6 : 0);
       field(cy2, sx + sw, NX - sx - sw, 0, NZ);
     } else {                          // horizontal slit
       const sh = d < 0.5 ? 2 : 1;
+      if (sh === 1) tight.push(yc(cy2));
       const sz = clamp(S.az - rng.int(0, sh - 1), 0, NZ - sh);
       field(cy2, 0, NX, 0, sz);
       field(cy2, 0, NX, sz + sh, NZ);
@@ -281,7 +289,7 @@ export function buildFortress(stageIdx, round, seed, def) {
       }
       used.add(r);
       if ((r - cy) % 3 === 1) {
-        const s = b.spawn(yc(r), 'tuna', xc(cx0 + 1), 0);
+        const s = b.spawn(yc(r), 'tuna', xc(cx0 + 1), 0, { alley: true });
         lastTunaY = s.y;
       }
       if (d > 0.15 && (r - cy) % 4 === 2) {
@@ -361,7 +369,7 @@ export function buildFortress(stageIdx, round, seed, def) {
   // ground spawns must not sit inside voxels
   b.spawns = sp.filter((s) => !((s.kind === 'turret' || s.kind === 'pad' || s.kind === 'tuna' || s.kind === 'radar') && (s.z || 0) === 0 &&
     (b.has(Math.floor(s.x / CELL), Math.floor(s.y / CELL), 0) || b.has(Math.floor(s.x / CELL), Math.floor(s.y / CELL), 1))));
-  b.spawns = b.spawns.filter((s) => !(s.kind === 'pad' && holes.some((h) => s.y > h.y - 280 && s.y < h.y + 24 && Math.abs(s.x - h.x) < 56)));
+  b.spawns = b.spawns.filter((s) => !((s.kind === 'pad' || s.kind === 'turret') && tight.some((ty) => s.y > ty - 300 && s.y < ty + 90)));
   const isClear = (q) => q > 2 && q < rows - 2 && !used.has(q) && !used.has(q - 1) && !used.has(q + 1);
   const clearRow = (r, lo, hi) => {
     for (let k = 0; k < 80; k++) {
@@ -386,6 +394,18 @@ export function buildFortress(stageIdx, round, seed, def) {
     }
     b.spawn(yc(r), 'tuna', laneX(r), laneZ(r));
   }
+  // line each loose tin up with the next wall's gap so a bot (or player) that holds fire collects it on the way in
+  gapRows.sort((p, q) => p.y - q.y);
+  const extra = [];
+  for (const s of b.spawns) {
+    if (s.kind !== 'tuna' || s.alley) continue;
+    const g = gapRows.find((q) => q.y > s.y + 40);
+    if (g && g.y - s.y < 300) {   // a low tin and a high tin on the same line: whichever side of the gap you hug, one is in the line of fire
+      s.x = clamp(Math.round(g.x), 20, 204); s.z = clamp(g.z + 6, 0, 100);
+      extra.push({ y: s.y + 6, kind: 'tuna', x: s.x, z: clamp(Math.max(g.z + 12, g.z1 - 18), 0, 100) });
+    }
+  }
+  for (const s of extra) b.spawns.push(s);
   // pickups every ~1200
   const picks = ['yarnpick', 'nip', 'laserpick'];
   for (let k = 0, y = 900; y < def.length - 400; k++, y += 1150 + rng.int(0, 100)) {

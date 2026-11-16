@@ -68,3 +68,18 @@ test('uses no Math.random', async () => {
     assert.ok(!/Math\.random/.test(fs.readFileSync(new URL(`../src/levels/${f}.js`, import.meta.url), 'utf8')));
   }
 });
+
+test('physical reach model: adjacent rows allow no lateral shift, body depth is subtracted', async () => {
+  const { reach, freeTime } = await import('../src/levels/util.js');
+  assert.equal(reach(1, 1).rx, 0);
+  assert.equal(reach(2, 1).rx, 0);          // ~6 units of free flight at 84 u/s
+  assert.ok(freeTime(2, 1) < 0.08);
+  assert.ok(reach(8, 1).rx > reach(8, 4).rx - 1);
+});
+
+test('body-accurate audit (autopilot.auditStage) passes generated fortresses with required slack', async () => {
+  const { auditLevel } = await import('../tools/validate-level.mjs');
+  for (const [si, round] of [[0, 1], [2, 4]]) for (let seed = 1; seed <= 4; seed++) {
+    assert.deepEqual(auditLevel(buildStage(si, round, seed), round), []);
+  }
+});

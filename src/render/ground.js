@@ -57,7 +57,7 @@ export function createGround(artRef, mk) {
       g.fillStyle = col.dark;
       if (r % 2 === 0) g.fillRect(ax, ay + 2, 1, SLAB - 2);                                                    // panel seam
       g.fillStyle = col.rim;                                                                                    // light rim on the x = 0 edge
-      for (let i = 0; i < EY.x; i++) g.fillRect(i, Math.round(-EY.y - 1 + (i * EY.y) / EY.x), 1, 1);
+      for (let i = 1; i < EY.x; i++) g.fillRect(i, Math.round(-EY.y - 1 + (i * EY.y) / EY.x), 1, 1);
       strips.push(c);
     }
   }

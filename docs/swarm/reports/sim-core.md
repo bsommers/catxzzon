@@ -24,6 +24,8 @@
 - `node --test test/sim-core.test.mjs`: 21 pass, 0 fail. Covers grid, determinism trail, a no-Math.random source scan, movement and clamps, fire rate, 3D altitude hits, homing, bomb, combo and extra life, wall death → respawn → game over, invulnerability, fuel and tuna, pickups and nip, fields with pulse, thread the needle, stage flow, boss → victory → round 2, behaviour dispatch with formation groups, pause, bullets, and real-levels integration.
 - `npm test`: whole suite green.
 - Scratch headless run with real `levels` + `buildStage`: 400 s of game time in about 120 ms. It went through all 4 stages, reached victory and looped into round 2. Max entity count was 45.
+- Re-ran the same check with the real `enemies.js` and `boss.js` once they landed. Runtime was about 160 ms for 400 s, with at most 57 entities. Boss → victory → round 2 still works. The flow sim-boss uses (`g.winStage(death)` and then `g.kill` at the end of its death sequence) does not double-trigger, because `bossDown` ignores the second call. `npm test`: 119 pass, 0 fail.
+- Compatibility checked: enemies.js moves its own entities and uses `e.on` for fields, which matches the core's conventions.
 
 ## Deviations from the contract
 - Velocity integration: the core integrates `vx/vy/vz` only for kinds that have no `update` behaviour. A behaviour that has `update` must move its entity itself. Hairball and yarn are handled by the core.

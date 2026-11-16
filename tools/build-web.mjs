@@ -5,11 +5,11 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdirSync, rmSync, cpSync, existsSync, statSync, readdirSync } from 'node:fs';
 import { gzipSync } from 'node:zlib';
-import { dirname, join, relative } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const dist = join(root, 'dist'), web = join(dist, 'web');
+let dist = join(root, 'dist'), web = join(dist, 'web');
 const ESBUILD = process.env.ESBUILD_SPEC || 'esbuild@0.25';
 
 function esbuild(args) {
@@ -23,28 +23,36 @@ const kb = (n) => (n / 1024).toFixed(1) + ' KB';
 const walk = (d) => readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(join(d, e.name)) : [join(d, e.name)]));
 
 /**
- * main.js loads its modules with import(variable), which a bundler cannot follow. Stage a copy of src/ where
- * tryImport() first consults a module map (every src module, bundled statically), then boot main.js from a tiny entry.
- * Falls back to the plain entry (with a warning) if main.js no longer has the expected `import(path)` shape.
+ * The game loads modules with import(variable) (main.js, renderer.js), which a bundler cannot follow. Stage a copy of
+ * src/ where each such call first consults a module map (every src module, bundled statically), then boot main.js
+ * from a tiny entry. Warns if no import(variable) is found (then the bundle is just main.js and its static imports).
  */
 function stageEntry(log) {
   const tmp = join(dist, '.stage');
   rmSync(tmp, { recursive: true, force: true });
   cpSync(join(root, 'src'), join(tmp, 'src'), { recursive: true });
-  const mainP = join(tmp, 'src/main.js');
-  const main = readFileSync(mainP, 'utf8');
-  const patched = main.replace(/return await import\(path\);/, 'return await (window.__mods && window.__mods[path] ? window.__mods[path] : import(path));');
-  if (patched === main) { log('WARN main.js: tryImport import(path) not found; bundling main.js as-is (dynamic modules may be missing)'); return 'src/main.js'; }
-  writeFileSync(mainP, patched);
+  // Rewrite every import(<identifier>) in src/ to consult the module map first (key = path relative to src/).
+  let patchedFiles = 0;
+  for (const f of walk(join(tmp, 'src')).filter((x) => x.endsWith('.js'))) {
+    const dir = relative(join(tmp, 'src'), dirname(f)).split('\\').join('/') || '.';
+    const text = readFileSync(f, 'utf8');
+    const out = text.replace(/(?<![\w$.])import\(\s*([A-Za-z_$][\w$]*)\s*\)/g, (_, id) => `(window.__imp ? window.__imp(${JSON.stringify(dir)}, ${id}, () => import(${id})) : import(${id}))`);
+    if (out !== text) { writeFileSync(f, out); patchedFiles++; }
+  }
+  if (!patchedFiles) log('WARN no import(variable) found in src/; bundling as-is');
   const mods = walk(join(tmp, 'src')).map((f) => relative(join(tmp, 'src'), f).split('\\').join('/')).filter((f) => f.endsWith('.js') && f !== 'main.js').sort();
   const lines = mods.map((f, i) => `import * as m${i} from './src/${f}';`);
-  lines.push(`window.__mods = {${mods.map((f, i) => ` './${f}': m${i}`).join(',')} };`, "await import('./src/main.js');");
+  lines.push(`const mods = {${mods.map((f, i) => ` ${JSON.stringify(f)}: m${i}`).join(',')} };`,
+    `window.__mods = mods;`,
+    `window.__imp = (dir, p, fb) => { const k = []; for (const s of (dir + '/' + p).split('/')) { if (s === '..') k.pop(); else if (s && s !== '.') k.push(s); } const m = mods[k.join('/')]; return m ? Promise.resolve(m) : fb(); };`,
+    "await import('./src/main.js');");
   writeFileSync(join(tmp, 'entry.js'), lines.join('\n') + '\n');
   return join(tmp, 'entry.js');
 }
 
 /** Build everything; returns { bundled, files:[{name,bytes,gzip}] }. */
-export function buildWeb({ bundle = true, log = console.log } = {}) {
+export function buildWeb({ bundle = true, log = console.log, outDir } = {}) {
+  dist = outDir ? resolve(outDir) : join(root, 'dist'); web = join(dist, 'web'); // tests pass a temp outDir so they never clobber dist/
   rmSync(web, { recursive: true, force: true });
   mkdirSync(web, { recursive: true });
   const html = readFileSync(join(root, 'index.html'), 'utf8');

@@ -44,19 +44,23 @@ test('icon: 256x256 PNG with some non-transparent pixels', async () => {
 
 test('web build (unbundled fallback) copies src and keeps index.html loadable', () => {
   process.env.NO_ESBUILD = '1';
-  try { const r = buildWeb({ log() {} }); assert.equal(r.bundled, false); } finally { delete process.env.NO_ESBUILD; }
-  assert.ok(existsSync(join(root, 'dist/web/src/main.js')));
-  assert.ok(!existsSync(join(root, 'dist/catxzzon.html')), 'no stale single-file build');
+  const o = mkdtempSync(join(tmpdir(), 'webfb-'));
+  try { const r = buildWeb({ log() {}, outDir: o }); assert.equal(r.bundled, false); } finally { delete process.env.NO_ESBUILD; }
+  assert.ok(existsSync(join(o, 'web/src/main.js')));
+  assert.ok(!existsSync(join(o, 'catxzzon.html')), 'no single-file build without a bundler');
+  rmSync(o, { recursive: true, force: true });
 });
 
 test('web build (esbuild): single file is self-contained, web build has one JS + one CSS', (t) => {
-  const r = buildWeb({ log() {} });
+  const o = mkdtempSync(join(tmpdir(), 'webbn-'));
+  t.after(() => rmSync(o, { recursive: true, force: true }));
+  const r = buildWeb({ log() {}, outDir: o });
   if (!r.bundled) return t.skip('esbuild unavailable (offline)');
-  const one = readFileSync(join(root, 'dist/catxzzon.html'), 'utf8');
+  const one = readFileSync(join(o, 'catxzzon.html'), 'utf8');
   assert.ok(!/<link[^>]+stylesheet/.test(one), 'css must be inlined');
   assert.ok(!/<script[^>]+src=/.test(one), 'js must be inlined');
   assert.equal((one.match(/<script/g) || []).length, 1);
-  const web = readFileSync(join(root, 'dist/web/index.html'), 'utf8');
+  const web = readFileSync(join(o, 'web/index.html'), 'utf8');
   assert.match(web, /src="app\.js"/); assert.match(web, /href="style\.css"/);
 });
 

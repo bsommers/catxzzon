@@ -4,9 +4,11 @@
 import { CELL, FIELD_W, TUNING, FIELD_CELLS_X, FIELD_CELLS_Z } from '../core/defs.js';
 
 const PB = TUNING.playerBox;
-const MOVES = [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
+const SEEK = [9, 9];      // sentinel: proportional move straight at the target (lands exactly, no overshoot)
+const MOVES = [SEEK, [0, 0], [1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
 const HAZ_RANGE_Y = 260;          // hazards further ahead than this are ignored
 const BOMB_COOLDOWN = 1.3;
+const DT = 1 / 60;
 
 function mulberry(seed) {
   let a = seed >>> 0;
@@ -20,6 +22,15 @@ function fieldOnAt(e, t) {
   const per = e.pulse, onF = e.onFrac ?? 0.55;
   const ph = ((((e.t + t + (e.phase || 0)) % per) + per) % per) / per;
   return ph < onF + 0.05;          // pessimistic
+}
+
+/** Target for a player at forward position y: first chain row whose far edge the player's rear has not left yet. */
+function targetAt(tgt, y) {
+  const ch = tgt.chain;
+  if (!ch) return tgt;
+  const rear = y - PB.d / 2;
+  for (let i = 0; i < ch.length; i++) if (rear < ch[i].end) return ch[i];
+  return ch[ch.length - 1];
 }
 
 export function createAutopilot(game, opts = {}) {
@@ -76,7 +87,7 @@ export function createAutopilot(game, opts = {}) {
     let slack = 1;
     const trav = (ax, az, bx, bz, dy) => {
       const t = Math.max(0, dy) / spd * slack;
-      const needX = Math.abs(ax - bx) - 4, needZ = Math.abs(az - bz) - 4;
+      const needX = Math.abs(ax - bx) - 5, needZ = Math.abs(az - bz) - 7;   // cell regions leave a few units of play
       if (needX > TUNING.moveX * t || needZ > TUNING.moveZ * t) return INF;
       return Math.abs(ax - bx) / TUNING.moveX + Math.abs(az - bz) / TUNING.moveZ;
     };
@@ -113,10 +124,10 @@ export function createAutopilot(game, opts = {}) {
         const v = tc + cost[0][c];
         if (v < best) { best = v; bc = c; }
       }
-      return bc;
+      return bc >= 0 ? { bc, nxt } : null;
     };
-    let K = Math.min(rows.length, rowsLook), bc = -1;
-    for (; K >= 1; K--) { slack = 0.6; bc = solve(K); if (bc < 0) { slack = 1; bc = solve(K); } if (bc >= 0) break; }
+    let K = Math.min(rows.length, rowsLook), bc = -1, sol = null;
+    for (; K >= 1; K--) { slack = 0.6; sol = solve(K); if (!sol) { slack = 1; sol = solve(K); } if (sol) { bc = sol.bc; break; } }
     if (bc < 0) {                       // unreachable: head for the nearest free cell of the first row
       let bd = 1e9;
       for (let c = 0; c < N; c++) {
@@ -127,8 +138,25 @@ export function createAutopilot(game, opts = {}) {
       }
       if (bc < 0) return null;
     }
-    const [tx, tz] = cellPos((bc / FIELD_CELLS_Z) | 0, bc % FIELD_CELLS_Z);
-    return { x: tx, z: tz, dy: rows[0].cy * CELL - p.y, lock: true };
+    if (K < 1) K = 1;
+    // chain of per-row targets; each is aimed inside its cell at the point closest to the next row's cell (pre-positioning)
+    const chain = [];
+    let c = bc;
+    for (let j = 0; j < K && c >= 0; j++) {
+      const cxo = (c / FIELD_CELLS_Z) | 0, czo = c % FIELD_CELLS_Z;
+      const [cx0, cz0] = cellPos(cxo, czo);
+      const nc = sol && j < K - 1 ? sol.nxt[j][c] : -1;
+      let tx = cx0, tz = cz0;
+      if (nc >= 0) {
+        const [nx, nz] = cellPos((nc / FIELD_CELLS_Z) | 0, nc % FIELD_CELLS_Z);
+        const mx = (CELL - PB.w) / 2 - 1, mz = (CELL - PB.h) / 2 - 1;
+        tx = clamp(nx, cx0 - mx, cx0 + mx); tz = clamp(nz, cz0 - mz, cz0 + mz);
+      }
+      chain.push({ end: (rows[j].cy + 1) * CELL, x: tx, z: clamp(tz, TUNING.zMin, TUNING.zMax) });
+      c = nc;
+    }
+    const tx = chain[0].x, tz = chain[0].z;
+    return { x: tx, z: tz, dy: rows[0].cy * CELL - p.y, lock: true, K, chain, rows: rows.map((r) => r.cy) };
   }
 
   // ---------- opportunistic target (no wall near): pickups, fuel tins, enemies ----------
@@ -179,8 +207,13 @@ export function createAutopilot(game, opts = {}) {
     const hw = PB.w / 2 + margin, hd = PB.d / 2 + margin * 0.5, hh = PB.h + margin;
     for (let k = 1; k <= steps; k++) {
       const m = k <= half ? m1 : m2;
-      x = clamp(x + m[0] * TUNING.moveX * h, TUNING.xMin, TUNING.xMax);
-      z = clamp(z + m[1] * TUNING.moveZ * h, TUNING.zMin, TUNING.zMax);
+      let mx = m[0], mz = m[1];
+      if (m === SEEK) {
+        const tg = targetAt(tgt, p.y + sv * (k - 1) * h);
+        mx = clamp((tg.x - x) / (TUNING.moveX * h), -1, 1); mz = clamp((tg.z - z) / (TUNING.moveZ * h), -1, 1);
+      }
+      x = clamp(x + mx * TUNING.moveX * h, TUNING.xMin, TUNING.xMax);
+      z = clamp(z + mz * TUNING.moveZ * h, TUNING.zMin, TUNING.zMax);
       const t = k * h, y = p.y + sv * (t - h * 0.8);   // the game checks collisions before the scroll advance
       const w = 1 + (steps - k) / steps;     // nearer in time = worse
       if (g.grid.boxHit(x - PB.w / 2 + 0.6, x + PB.w / 2 - 0.6, y - PB.d / 2 + 0.6, y + PB.d / 2 - 0.6, z + 0.6, z + PB.h - 0.6)) { cost += 4000 * w; continue; }
@@ -194,10 +227,11 @@ export function createAutopilot(game, opts = {}) {
       }
     }
     // goal: end near target
-    const dx = Math.abs(x - tgt.x) / TUNING.moveX, dz = Math.abs(z - tgt.z) / TUNING.moveZ;
+    const tg = targetAt(tgt, p.y + sv * T);
+    const dx = Math.abs(x - tg.x) / TUNING.moveX, dz = Math.abs(z - tg.z) / TUNING.moveZ;
     cost += (tgt.lock ? 60 : tgt.weak ? 4 : 14) * (dx + dz);
     // slightly prefer to stay off the field edges, and small cost for moving
-    cost += (Math.abs(m1[0]) + Math.abs(m1[1])) * 0.05;
+    cost += m1 === SEEK ? 0 : (Math.abs(m1[0]) + Math.abs(m1[1])) * 0.05;
     if (m1 !== lastMove) cost += 6;                       // hysteresis against dithering
     return cost;
   }
@@ -219,10 +253,12 @@ export function createAutopilot(game, opts = {}) {
       }
     }
     lastMove = best;
-    // smooth approach: proportional steering when the best move is toward the target on an axis (avoids dithering)
     let dx = best[0], dz = best[1];
-    if (dx !== 0 && Math.abs(tgt.x - p.x) < 3) dx = (tgt.x - p.x) / 3;
-    if (dz !== 0 && Math.abs(tgt.z - p.z) < 3) dz = (tgt.z - p.z) / 3;
+    if (best === SEEK) {
+      const tg = targetAt(tgt, p.y);
+      dx = clamp((tg.x - p.x) / (TUNING.moveX * DT), -1, 1);
+      dz = clamp((tg.z - p.z) / (TUNING.moveZ * DT), -1, 1);
+    }
     return { dx, dz };
   }
 

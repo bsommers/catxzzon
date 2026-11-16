@@ -55,8 +55,9 @@ export const BOSS = {
   wallVy:  [0, 52, 64],     // laser wall approach speed
   wallVx:  [0, 50, 70],     // sweep speed (sweep walls)
   jets:    [0, 0, 13],      // s between mousejet summons (0 = never)
-  tunaFuel: 38,             // drop a tuna when fuel is below this (and the last drop is old)
+  tunaFuel: 45,             // drop a tuna when fuel is below this (and the last drop is old)
   tunaEvery: 11,            // s min between fuel drops
+  perRound: 0.1,            // missile/fan speed + missile turn rate multiplier per extra round (max +30%)
   tauntGap: 7,              // s min between incidental taunts
 };
 export const PHASE_FRAC = [2 / 3, 1 / 3];  // hp01 thresholds for phase 2 and 3
@@ -129,7 +130,7 @@ function fireMissile(e, g, k) {
 }
 
 function steerMissiles(e, dt, g, k) {
-  const list = e.st.missiles, p = g.player;
+  const list = e.st.missiles, p = g.player, rk = e.st.rk, vy = BOSS.mVy[k] * rk;
   for (let i = 0; i < list.length; i++) {
     const m = list[i];
     if (m.dead) continue;
@@ -137,11 +138,11 @@ function steerMissiles(e, dt, g, k) {
     m.frame = ((m.t || 0) * 12 | 0) & 3;
     if (ms.home && ((m.t || 0) > BOSS.mLife[k] || m.y < p.y - 8 || !playerAlive(g))) ms.home = false;
     if (!ms.home) continue;                   // fly on straight (sim-core integrates, despawns behind the player)
-    const step = BOSS.mAcc[k] * dt;
-    if ((m.t || 0) < 0.35) { m.vy = approach(m.vy, -BOSS.mVy[k], step); continue; }   // pop out of the throne
+    const step = BOSS.mAcc[k] * rk * dt;
+    if ((m.t || 0) < 0.35) { m.vy = approach(m.vy, -vy, step); continue; }   // pop out of the throne
     m.vx = approach(m.vx, clamp((p.x - m.x) * 1.6, -BOSS.mVx[k], BOSS.mVx[k]), step);
     m.vz = approach(m.vz, clamp((p.z + PLAYER_HALF_H - (m.z + m.h / 2)) * 1.6, -BOSS.mVz[k], BOSS.mVz[k]), step);
-    m.vy = approach(m.vy, -BOSS.mVy[k], step);
+    m.vy = approach(m.vy, -vy, step);
     if (m.z < 0) { m.z = 0; if (m.vz < 0) m.vz = 0; }
   }
 }
@@ -149,7 +150,7 @@ function steerMissiles(e, dt, g, k) {
 function fireFan(e, g, k) {
   const n = BOSS.fanN[k];
   if (!n) return;
-  const x = e.x, y = e.y - e.d / 2 - 2, z = e.z + e.h * 0.7, sp = BOSS.fanSpeed[k];
+  const x = e.x, y = e.y - e.d / 2 - 2, z = e.z + e.h * 0.7, sp = BOSS.fanSpeed[k] * e.st.rk;
   aim(g, x, y, z, sp);
   const bx = AIM.vx, by = AIM.vy, bz = AIM.vz;
   const life = clamp(AIM.t * 1.8 + 0.8, 2, 4.5);
@@ -207,7 +208,7 @@ function drop(e, g, kind, dx) {
 }
 
 function dropFuel(e, g) {
-  drop(e, g, 'tuna', g.player.x < FIELD_W / 2 ? 26 : -26);
+  drop(e, g, 'tuna', 0);                         // dead ahead: a cat holding fire shoots it open
   e.st.fuelT = BOSS.tunaEvery;
 }
 
@@ -261,8 +262,8 @@ function closeWindow(e, g, k) {
   if (k >= 1) {                                    // phase 2/3: an attack plays during recovery
     s.actT += 1.2;
     const n = s.cycle++;
-    if (k === 2 || (n & 1)) fireFan(e, g, k);
-    if (k === 2 ? (n % 2 === 0) : (n & 1) === 0) fireWall(e, g, k, n % 3);
+    fireFan(e, g, k);
+    if ((n & 1) === 0) fireWall(e, g, k, (n >> 1) % 3);
     if (k === 2) s.fan2 = 0.8;                     // second fan mid-recovery when enraged
   }
 }
@@ -355,6 +356,7 @@ export const bossBehavior = {
     s.tx = e.x; s.tz = e.z; s.retarget = 0; s.jetT = 4; s.fuelT = 0; s.tauntT = 0; s.fan2 = 0; s.flinch = 0;
     s.tinkT = 0; s.boomT = 0; s.boomN = 0; s.lastAlive = true;
     s.missiles = []; s.walls = [];
+    s.rk = 1 + BOSS.perRound * Math.min(3, Math.max(0, ((g.round | 0) || 1) - 1));   // later rounds: faster fire
     emitBoss(e, g);
     taunt(e, g, 0, 3);                              // YOU DARE ENTER MY CASTLE?
     g.shake(4, 0.5);

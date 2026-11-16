@@ -128,8 +128,8 @@ export const CREDITS = [
 export function creditsLength() { return CREDITS.reduce((a, [, s]) => a + 10 * (s || 1) + 6, 0); }
 /** Scrolling credits; t = seconds since start. Returns true when the roll has finished. */
 export function drawCredits(ctx, t, { backdropOn = true } = {}) {
-  if (backdropOn) backdrop(ctx, t, '#0a0614', '#241030'); else { ctx.fillStyle = 'rgba(8,4,16,0.7)'; ctx.fillRect(0, 0, W, H); }
-  let y = H - t * 28;
+  if (backdropOn) backdrop(ctx, t, '#0a0614', '#241030'); else { ctx.fillStyle = 'rgba(8,4,16,0.8)'; ctx.fillRect(0, 0, W, H); }
+  let y = H - t * 34;
   for (const [txt, s = 1, col = '#fff'] of CREDITS) {
     if (txt && y > -40 && y < H + 10) drawText(ctx, txt, W / 2, Math.round(y), { align: 'center', scale: s, color: col, shadow: '#000' });
     y += 10 * s + 6;

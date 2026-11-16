@@ -189,7 +189,7 @@ export function schedule(ctx, dest, voices, t0, { pan = 0, gain = 1 } = {}) {
     if (o.src === 'noise') {
       src = ctx.createBufferSource(); src.buffer = getNoise(ctx); src.loop = true;
     } else {
-      src = ctx.createOscillator(); src.type = o.src;
+      src = ctx.createOscillator(); src.type = o.src === 'saw' ? 'sawtooth' : o.src;
       ramp(src.frequency, o.f, t, o.dur);
       if (o.fm) {
         const m = ctx.createOscillator(), mg = ctx.createGain();

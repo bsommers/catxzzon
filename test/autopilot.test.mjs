@@ -109,3 +109,27 @@ test('tools/botplay.mjs exits non-zero when skill=1 fails stage 0 on >25% of see
   assert.equal(r.status, 1);
   assert.match(r.stderr, /FAIL/);
 });
+
+test('commits to a 1-cell hole: alternating low/high single-cell gaps are cleared with one life', () => {
+  const rows = [];
+  for (let i = 0; i < 8; i++) rows.push({ cy: 10 + i * 7, gaps: [[i % 2 ? 10 : 3, i % 2 ? 10 : 3, i % 2 ? 6 : 0, i % 2 ? 6 : 0]] });
+  const { g } = play(walled(rows), { maxT: 90 });
+  assert.equal(g.state, 'stageclear', 'state ' + g.state);
+  assert.equal(g.lives, 1);
+});
+
+test('does not stall at the ceiling: a committed low gap is reached from z max', () => {
+  const st = walled([{ cy: 30, gaps: [[6, 7, 0, 1]] }]);
+  const g = createGame({ seed: 5, bus: quiet, buildStage: () => st, stageIdx: 0, lives: 1 });
+  const ap = createAutopilot(g, { skill: 1 });
+  g.player.z = 120;
+  for (let i = 0; i < 60 * 60 && g.state !== 'gameover' && g.state !== 'stageclear'; i++) g.update(DT, ap.input(g, DT));
+  assert.notEqual(g.state, 'gameover');
+});
+
+test('regression: stage 0 round 1 seed 23 no longer parks at z max under a field (hysteresis trap)', () => {
+  const g = createGame({ seed: 23, bus: quiet, round: 1, stageIdx: 0, startStage: 0, buildStage, lives: 1 });
+  const ap = createAutopilot(g, { skill: 1 });
+  for (let i = 0; i < 60 * 40 && g.state !== 'gameover' && g.scrollY < 2300; i++) g.update(DT, ap.input(g, DT));
+  assert.ok(g.scrollY >= 2300, 'died at y=' + Math.round(g.scrollY));
+});

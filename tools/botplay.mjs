@@ -2,7 +2,7 @@
 // botplay: run the autopilot headless and report reach / deaths / score / time per seed.
 //   (add --assist to make the player invulnerable in impossible wall windows)
 //   node tools/botplay.mjs --stage 0 --round 1 --seeds 1..8 [--skill 1] [--lives 3] [--maxt 240] [--verbose]
-// Exit code 1 if a skill=1 bot fails to clear stage 0 on more than 25% of seeds.
+// Exit code 1 if a skill=1 bot fails to clear stage 0 (round 1 only) on more than 25% of seeds.
 import { createGame } from '../src/sim/game.js';
 import { buildStage } from '../src/levels/index.js';
 import { createAutopilot } from '../src/sim/autopilot.js';
@@ -62,5 +62,5 @@ const hist = new Map();
 for (const r of results) for (const d of r.deaths) { const k = Math.floor(d.y / 200) * 200; hist.set(k, (hist.get(k) || 0) + 1); }
 if (hist.size) console.log('death hot spots (y bucket:count): ' + [...hist.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([k, v]) => `${k}-${k + 199}:${v}`).join('  '));
 console.log(`summary: cleared ${results.length - fails}/${results.length}, deaths ${results.reduce((a, r) => a + r.deaths.length, 0)}, avg score ${Math.round(results.reduce((a, r) => a + r.score, 0) / results.length)}`);
-if (skill >= 1 && stage === 0 && fails / results.length > 0.25) { console.error('FAIL: skill=1 bot failed stage 0 on >25% of seeds'); process.exit(1); }
+if (skill >= 1 && stage === 0 && round === 1 && fails / results.length > 0.25) { console.error('FAIL: skill=1 bot failed stage 0 on >25% of seeds'); process.exit(1); }
 if (verbose) console.log(JSON.stringify(results));

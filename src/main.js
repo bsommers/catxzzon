@@ -5,6 +5,7 @@ import { createInput } from './core/input.js';
 import { loadSettings, saveSettings, loadHi, saveHi, hiRank, insertHi, topScore } from './core/settings.js';
 import { createMenu, optionsItems, pauseItems, titleItems, drawMenu, drawPanel } from './ui/menus.js';
 import * as S from './ui/screens.js';
+import { createJuice } from './ui/juice.js';
 
 const W = 640, H = 360, STEP = 1 / 60;
 const q = new URLSearchParams(location.search);
@@ -19,7 +20,7 @@ const settings = loadSettings();
 let hiList = loadHi();
 const input = createInput({ canvas });
 const M = { mode: 'loading', t: 0, modeT: 0, loadP: 0, err: null };   // M.mode is the screen state machine
-let game = null, attract = null, mods = {}, renderer = null, audio = null, popups = null, hud = null;
+let game = null, attract = null, mods = {}, renderer = null, audio = null, popups = null, hud = null, juice = null;
 let menu = null, optReturn = 'title', initials = null, rank = -1, gameOverScore = 0, creditsT = 0, botOn = q.get('bot') === '1';
 let acc = 0, last = 0, fps = 60, frames = 0, fpsT = 0;
 
@@ -56,7 +57,8 @@ function botInput(g, dt) {
 }
 
 // ---- game lifecycle ----
-function quietBus() { return { on: bus.on.bind(bus), emit: (t, p) => { if (t !== 'sfx' && t !== 'music') bus.emit(t, p); } }; }
+const ATTRACT_MUTED = new Set(['sfx', 'music', 'banner', 'taunt', 'gameover', 'victory']);   // attract demo stays silent and banner-free
+function quietBus() { return { on: bus.on.bind(bus), emit: (t, p) => { if (!ATTRACT_MUTED.has(t)) bus.emit(t, p); } }; }
 function newGame(o = {}) {
   const create = mods.game?.createGame; if (!create) return null;
   return create({ seed: o.seed ?? num('seed', (Date.now() & 0xffff) || 1), bus: o.bus || bus, round: o.round ?? num('round', 1),
@@ -66,10 +68,10 @@ function startAttract() {
   bot = null; attract = newGame({ bus: quietBus(), seed: 7 + (Date.now() % 50), stage: 0, round: 1 });
 }
 function toTitle() {
-  game = null; bot = null; startAttract(); menu = createMenu(titleItems()); setMode('title'); music('title');
+  game = null; bot = null; if (juice) { juice.active = false; juice.reset(); } startAttract(); menu = createMenu(titleItems()); setMode('title'); music('title');
 }
 function startGame() {
-  attract = null; bot = null; game = newGame(); hud?.reset?.(); setMode('play'); window.__catxzzon.game = game;
+  attract = null; bot = null; juice?.reset(); if (juice) juice.active = true; game = newGame(); hud?.reset?.(); setMode('play'); window.__catxzzon.game = game;
   if (!game) fail(new Error('simulation module (src/sim/game.js) failed to load'));
 }
 function openOptions(ret) {
@@ -117,10 +119,15 @@ function simStep(inp) {
 }
 
 let audioReady = false;
-function firstGesture() { if (audioReady) return; audioReady = true; try { audio?.resume?.(); } catch { /* ignore */ } }
+function firstGesture() {
+  if (audioReady || !audio) return;            // audio may still be loading: retry on the next gesture
+  try { audio.resume?.(); audioReady = true; } catch { /* ignore */ }
+}
 
+const perf = { ms: 0, max: 0, n: 0 };                // whole-frame cost (sim + render + ui), shown with ?debug=1
 function frame(now) {
   requestAnimationFrame(frame);
+  const f0 = performance.now();
   try {
     const dt = Math.min(0.25, Math.max(0, (now - (last || now)) / 1000)); last = now;
     M.t += dt; M.modeT += dt; frames++; fpsT += dt; if (fpsT >= 0.5) { fps = frames / fpsT; frames = 0; fpsT = 0; }
@@ -128,6 +135,7 @@ function frame(now) {
     if (M.mode === 'play') {
       const pad = input.poll();
       if (pad.pause) { menu = createMenu(pauseItems()); setMode('pause'); bus.emit('pause', { on: true }); }
+      else if (game && renderer && renderer.hitstop > 0) { acc = 0; }   // hit-stop: the world really freezes, not only the picture
       else if (game) {
         acc = Math.min(acc + dt, 0.1);
         let first = true;
@@ -142,8 +150,10 @@ function frame(now) {
         if (attract.state === 'gameover' || attract.t > 45) startAttract();
       }
     }
+    if (juice && game && (M.mode === 'play')) juice.update(dt, game);
     draw(acc / STEP);
   } catch (e) { if (M.mode !== 'error') fail(e); try { draw(0); } catch { /* ignore */ } }
+  const fm = performance.now() - f0; perf.ms += (fm - perf.ms) * 0.05; perf.n++; if (perf.n > 120) perf.max = Math.max(perf.max * 0.999, fm);
 }
 
 function drawWorld(g, alpha) {
@@ -162,21 +172,31 @@ function draw(alpha) {
       if (M.mode === 'options') { S.drawPauseDim(ctx); drawPanel(ctx, W / 2 - 130, 70, 260, 210); drawMenu(ctx, menu, W / 2, 84, t, { width: 220 }); break; }
       { const cyc = M.modeT % 22;
         if (cyc > 16) { S.drawPauseDim(ctx); S.drawHiTable(ctx, hiList, t, { y: 80 }); }
-        else { S.drawTitle(ctx, t, { hi: topScore(hiList), showBackdrop: !g, pressFire: false }); drawText(ctx, 'PRESS FIRE', W / 2, 172, { align: 'center', scale: 2, color: Math.floor(t * 2.4) % 2 ? '#fff' : '#ffd21f' }); drawMenu(ctx, menu, W / 2, 208, t, { width: 120 }); } }
+        else { S.drawTitle(ctx, t, { hi: topScore(hiList), showBackdrop: !g, pressFire: false }); drawText(ctx, 'PRESS FIRE', W / 2, 172, { align: 'center', scale: 2, color: Math.floor(t * 2.4) % 2 ? '#fff' : '#ffd21f' }); drawPanel(ctx, W / 2 - 84, 198, 168, 52); drawMenu(ctx, menu, W / 2, 208, t, { width: 120 }); } }
       break;
     case 'play': if (game) { drawWorld(game, alpha); if (game.state === 'victory') S.drawVictory(ctx, t, game.round); } input.drawTouch(ctx, W, H); break;
     case 'pause': drawWorld(game, 0); S.drawPauseDim(ctx); drawPanel(ctx, W / 2 - 110, 110, 220, 120); drawText(ctx, 'PAUSED', W / 2, 122, { align: 'center', scale: 2, color: '#ffd21f' }); drawMenu(ctx, menu, W / 2, 156, t, { width: 150 }); break;
     case 'gameover': S.drawGameOver(ctx, t, { score: gameOverScore, rank, initials, hiList, age: M.modeT }); break;
     case 'error': S.drawError(ctx, M.err, t); break;
   }
-  if (q.get('debug') === '1') drawText(ctx, `FPS ${fps.toFixed(0)} ENTS ${(game || attract)?.ents?.length ?? 0} ${M.mode}`, 4, 4, { color: '#0f0' });
+  if (q.get('debug') === '1') {
+    const st = renderer?.stats, sc = st?.scene;
+    drawText(ctx, `FPS ${fps.toFixed(0)} FRAME ${perf.ms.toFixed(1)}MS (REN ${(st?.ms ?? 0).toFixed(1)}) ENTS ${(game || attract)?.ents?.length ?? 0} ${M.mode.toUpperCase()}`, W - 8, H - 22, { color: '#0f0', align: 'right' });
+    if (sc) drawText(ctx, `VOX ${sc.cellsDrawn ?? 0} SPR ${sc.sprites ?? 0}`, W - 8, H - 12, { color: '#0f0', align: 'right' });
+  }
 }
 
 async function boot() {
-  window.__catxzzon = { M, settings, bus, input, get game() { return game; }, set game(v) { game = v; } };
+  if (q.get('scene') === 'demo') {             // renderer harness: hand the canvas to src/render/demo.js (it self-starts)
+    const d = await tryImport('./render/demo.js');
+    if (d && !window.__demoStarted && typeof d.runDemo === 'function') { window.__demoStarted = true; d.runDemo(canvas); }
+    if (!d) { ctx.fillStyle = '#300'; ctx.fillRect(0, 0, W, H); drawText(ctx, 'DEMO MODULE MISSING', W / 2, H / 2, { align: 'center' }); }
+    return;
+  }
+  window.__catxzzon = { M, settings, bus, input, get game() { return game; }, set game(v) { game = v; }, get renderer() { return renderer; }, get juice() { return juice; }, get audio() { return audio; }, perf };
   window.addEventListener('error', (e) => fail(e.error || e.message));
   window.addEventListener('unhandledrejection', (e) => fail(e.reason));
-  for (const ev of ['keydown', 'pointerdown', 'touchstart']) window.addEventListener(ev, firstGesture, { once: false, passive: true });
+  for (const ev of ['keydown', 'pointerdown', 'mousedown', 'touchend', 'click']) window.addEventListener(ev, firstGesture, { once: false, passive: true });
   requestAnimationFrame(frame);
   const steps = [
     ['game', './sim/game.js'], ['levels', './levels/index.js'], ['autopilot', './sim/autopilot.js'], ['hud', './ui/hud.js'],
@@ -189,6 +209,10 @@ async function boot() {
   try {
     const art = mods.registry?.buildAll?.();
     renderer = mods.renderer?.createRenderer?.(canvas, { bus, art }) || null;
+    try { hud?.setHudArt?.(renderer?.art || art); } catch (e) { console.warn(e); }
+    juice = createJuice({ bus, art: renderer?.art || art });
+    renderer?.setOverlay?.((c, g, tt) => { if (g && g === game) juice.draw(c, g, tt, renderer.camY ?? g.scrollY); });
+    renderer?.ready?.then?.(() => { if (renderer.drawsPopups) popups = null; });   // the renderer owns popups: no duplicate list
   } catch (e) { console.warn('[catxzzon] renderer failed', e); renderer = null; }
   applySettings(); M.loadP = 1; await nextFrame();
   if (q.get('autostart') === '1' || q.has('stage')) startGame(); else toTitle();

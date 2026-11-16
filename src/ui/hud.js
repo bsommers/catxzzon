@@ -61,6 +61,25 @@ function roundFlags(ctx, rightX, y, round) {
   return rightX - x;
 }
 
+// Art registry (optional): when set, the boss bar shows the real jesse_bust sprite instead of the vector fallback.
+let ART = null;
+/** setHudArt(registry) -> registry with get(name, frame) (src/art/registry.js). Pass null to use the vector fallback. */
+export function setHudArt(art) { ART = art && typeof art.get === 'function' ? art : null; }
+function bustImg(frame) {
+  if (!ART) return null;
+  try { const c = ART.get('jesse_bust', frame); return c && c.width ? c : null; } catch { return null; }
+}
+/** 44x44 portrait from jesse_bust (crop of the 64x64 face, 1:1 so the pixels stay crisp). Returns false when no art. */
+function jesseBust(ctx, x, y, hurt, enraged) {
+  const img = bustImg(enraged || hurt ? 1 : 0);
+  if (!img || typeof ctx.drawImage !== 'function') return false;
+  R(ctx, C.panelHi, x - 1, y - 1, 46, 46); R(ctx, '#1e1830', x, y, 44, 44);
+  const j = hurt ? 1 : 0;
+  ctx.drawImage(img, 10, 2, 44, 44, x + j, y, 44, 44);
+  if (hurt) { ctx.globalAlpha = 0.45; R(ctx, '#ffffff', x, y, 44, 44); ctx.globalAlpha = 1; }
+  return true;
+}
+
 function jesse(ctx, x, y, hurt) {   // 28x30 bust: blue-grey dilute tortie, cream + apricot patches, amber eyes, imperious
   R(ctx, C.ink, x, y + 2, 28, 28);
   R(ctx, '#8a96b4', x + 2, y + 6, 24, 22);
@@ -176,8 +195,13 @@ function bossBar(ctx, game, t, st) {
   if (hp < st.lastBoss01 - 1e-6) st.hurtT = 0.25;
   st.lastBoss01 = hp;
   const hurt = st.hurtT > 0;
-  R(ctx, C.ink, x - 40, y - 12, w + 46, h + 28);
-  jesse(ctx, x - 36, y - 8, hurt);
+  if (bustImg(0)) {
+    R(ctx, C.ink, x - 52, y - 16, w + 58, 50);
+    jesseBust(ctx, x - 50, y - 14, hurt, hp < 0.34);
+  } else {
+    R(ctx, C.ink, x - 40, y - 12, w + 46, h + 28);
+    jesse(ctx, x - 36, y - 8, hurt);
+  }
   bar(ctx, x + 2, y, w, h, hp, hurt ? C.white : '#ff9a9a', hp < 0.3 && Math.floor(t * 6) % 2 === 0 ? C.white : C.red, C.redLo);
   for (let i = 1; i < 8; i++) R(ctx, C.ink, x + 2 + Math.round(w * i / 8), y, 1, 3);
   drawText(ctx, st.bossName, x + 2, y + 15, { color: C.cheeseHi });
@@ -207,7 +231,7 @@ function comboMeter(ctx, game, t, st) {
   const pulse = st.comboPop > 0 ? 3 : 2;
   const col = ['#ffd23f', '#ffb020', '#ff9a2e', '#ff6a3a', '#ff4a4a', '#ff4aa0', '#c46aff', '#6af0ff'][clamp(mult - 1, 0, 7)];
   drawText(ctx, 'X' + mult, x, y, { scale: pulse, color: col });
-  drawText(ctx, 'COMBO', x + 34, y + 3, { color: C.cheeseHi });
+  drawText(ctx, 'COMBO', x + Math.max(34, measureText('X' + mult, pulse) + 4), y + 3, { color: C.cheeseHi });
   const f = clamp((game.comboT ?? 0) / 1.5, 0, 1);
   bar(ctx, x, y + 20, 70, 4, f, C.white, col, C.cheeseLo);
 }
@@ -242,7 +266,7 @@ export function drawHud(ctx, game, t = 0) {
   // round + stage
   const rw = roundFlags(ctx, 632, 8, Math.max(1, game.round | 0));
   const sname = STAGES[game.stageIdx]?.name ?? game.stage?.name;
-  if (sname) drawText(ctx, sname, 632, 6 + 16, { color: C.grey, align: 'right', shadow: null });
+  if (sname) drawText(ctx, sname, 632, 6 + 16, { color: '#c8d0e0', align: 'right', shadow: C.ink });
   drawText(ctx, 'RD ' + (game.round | 0), 632 - rw - 6, 10, { color: C.cheeseHi, align: 'right' });
 
   altimeter(ctx, game, t);

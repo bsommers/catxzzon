@@ -40,6 +40,7 @@ export function createAutopilot(game, opts = {}) {
   const rowCache = new Map(); let cacheStage = null;
   const prev = new Map();                 // ent id -> [x,y,z] last tick (for velocity)
   let lastT = -1, lastScroll = 0, scrollV = TUNING.baseSpeed;
+  let deathN = 0, wasAlive = true, lastDeathY = -1e9, sameSpot = 0;
   let questId = 0, planCache = null, lastMove = MOVES[0], hold = { dx: 0, dz: 0 }, holdN = 0, bombCd = 0, lastTarget = null;
   const reactEvery = 1 + Math.round((1 - skill) * 9);
   const horizon = 0.3 + 0.45 * skill;
@@ -170,7 +171,8 @@ export function createAutopilot(game, opts = {}) {
             if (!set[a * NZS + b]) continue;
             const z = zOf(b); if (Math.abs(z - cz) > az) continue;
             let v = Math.abs(x - cx) / TUNING.moveX + Math.abs(z - cz) / TUNING.moveZ;
-            if (tin && wy < tin.y) v += 0.5 * Math.max(0, Math.abs(x - tin.x) - 3) / TUNING.moveX + 0.35 * Math.max(0, z - TUNING.zMin - 3) / TUNING.moveZ;   // line up on a fuel tin when free to
+            if (tin && wy < tin.y) v += 0.5 * Math.max(0, Math.abs(x - tin.x) - 3) / TUNING.moveX + 0.35 * Math.max(0, Math.abs(z - clamp(tin.z + tin.h / 2 - PB.h / 2, TUNING.zMin + 2, TUNING.zMax - 8)) - 3) / TUNING.moveZ;   // line up on a fuel tin when free to
+            if (sameSpot > 0) v += 0.12 * sameSpot * (((a * 7 + b * 13 + sameSpot * 5) % 5) / 4);   // after a respawn, vary the approach
             if (v < bv) { bv = v; best = a * NZS + b; }
           }
         }
@@ -235,7 +237,7 @@ export function createAutopilot(game, opts = {}) {
     if (!tuna) { questId = 0; return null; }
     if (gap.y0 !== undefined && tuna.y > gap.y0) { questId = 0; return null; }       // tin lies beyond the wall: not now
     const spd = Math.max(scrollV, 30), wp = gap.chain[0];
-    const tz = TUNING.zMin + 2;
+    const tz = clamp(tuna.z + tuna.h / 2 - PB.h / 2, TUNING.zMin + 2, TUNING.zMax - 8);   // tin height, not just ground level
     const tA = Math.max(Math.abs(tuna.x - p.x) / TUNING.moveX, Math.abs(tz - p.z) / TUNING.moveZ);
     const tB = Math.max(Math.abs(wp.x - tuna.x) / TUNING.moveX, Math.abs(wp.z - tz) / TUNING.moveZ);
     const left = (gap.dy - 12) / spd - (questId === tuna.id ? 0 : 0.25);
@@ -265,7 +267,7 @@ export function createAutopilot(game, opts = {}) {
 
   function simulate(g, p, hz, m1, m2, tgt, T, sv) {
     const steps = Math.max(3, Math.round(T * 20)), h = T / steps;
-    let x = p.x, z = p.z, cost = 0;
+    let x = p.x, z = p.z, cost = 0, trk = 0;
     const half = Math.max(1, steps >> 1);
     const hw = PB.w / 2 + margin, hd = PB.d / 2 + margin * 0.5, hh = PB.h + margin;
     for (let k = 1; k <= steps; k++) {
@@ -277,6 +279,7 @@ export function createAutopilot(game, opts = {}) {
       }
       x = clamp(x + mx * TUNING.moveX * h, TUNING.xMin, TUNING.xMax);
       z = clamp(z + mz * TUNING.moveZ * h, TUNING.zMin, TUNING.zMax);
+      { const tk = targetAt(tgt, p.y + sv * k * h); trk += Math.abs(x - tk.x) / TUNING.moveX + Math.abs(z - tk.z) / TUNING.moveZ; }
       const t = k * h, y = p.y + sv * (t - h * 0.8);   // the game checks collisions before the scroll advance
       const w = 1 + (steps - k) / steps;     // nearer in time = worse
       if (g.grid.boxHit(x - PB.w / 2 + 0.9, x + PB.w / 2 - 0.9, y - PB.d / 2 + 0.9, y + PB.d / 2 - 0.9, z + 0.9, z + PB.h - 0.9)) { cost += 4000 * w; continue; }
@@ -284,7 +287,8 @@ export function createAutopilot(game, opts = {}) {
         const q = hz[i], e = q.e;
         if (q.field && !fieldOnAt(e, t)) continue;
         const ex = e.x + q.vx * t, ey = e.y + q.vy * t, ez = e.z + q.vz * t;
-        if (Math.abs(x - ex) * 2 < 2 * hw + e.w && Math.abs(y - ey) * 2 < 2 * hd + e.d && z - margin * 0.5 < ez + e.h && ez < z + hh) {
+        const mz = q.field && !(e.pulse > 0) ? 1.2 : margin;     // static fields: the planner's lattice is exact, so a fat z margin would push the bot out of a 1-cell gap path
+        if (Math.abs(x - ex) * 2 < 2 * hw + e.w && Math.abs(y - ey) * 2 < 2 * hd + e.d && z - mz * 0.5 < ez + e.h && ez < z + PB.h + mz) {
           cost += (e.kind === 'cheeseball' ? 3000 : 4000) * w; break;
         }
       }
@@ -292,7 +296,7 @@ export function createAutopilot(game, opts = {}) {
     // goal: end near target
     const tg = targetAt(tgt, p.y + sv * T);
     const dx = Math.abs(x - tg.x) / TUNING.moveX, dz = Math.abs(z - tg.z) / TUNING.moveZ;
-    cost += (tgt.lock ? 60 : tgt.weak ? 4 : 14) * (dx + dz);
+    cost += (tgt.lock ? 60 : tgt.weak ? 4 : 14) * (dx + dz) + (tgt.lock ? 12 : tgt.weak ? 0.5 : 3) * trk / steps;
     // slightly prefer to stay off the field edges, and small cost for moving
     cost += m1 === SEEK ? 0 : (Math.abs(m1[0]) + Math.abs(m1[1])) * 0.05;
     if (m1 !== lastMove) cost += 6;                       // hysteresis against dithering
@@ -340,6 +344,9 @@ export function createAutopilot(game, opts = {}) {
     const realDt = lastT >= 0 ? g.t - lastT : dt;
     lastT = g.t; lastScroll = g.scrollY;
     bombCd = Math.max(0, bombCd - (realDt > 0 ? realDt : 0));
+    if (wasAlive && !p.alive) { deathN++; sameSpot = Math.abs(p.y - lastDeathY) < 160 ? sameSpot + 1 : 1; lastDeathY = p.y; planCache = null; }
+    wasAlive = !!p.alive;
+    if (p.alive && p.y > lastDeathY + 400) sameSpot = 0;
     const live = g.state === 'play' || g.state === 'intro';
     if (!live || !p.alive) { remember(g); return out; }
 

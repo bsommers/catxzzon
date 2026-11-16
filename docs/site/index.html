@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CATXZZON - Zaxxon, but you are the cat</title>
+<meta name="description" content="An 80s isometric shooter where the cat is the spaceship. Zero assets, zero dependencies. Play in your browser.">
+<link rel="icon" href="favicon.svg">
+<style>
+:root{--bg:#120a22;--panel:#1d1233;--ink:#f3ecff;--mute:#a99cc7;--accent:#f5a623;--accent2:#ff5fa2;--line:#3a2a60}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 system-ui,sans-serif}
+a{color:var(--accent)}
+.wrap{max-width:1040px;margin:0 auto;padding:0 16px}
+header.hero{background:linear-gradient(#2b1450,var(--bg));padding:48px 0 32px;text-align:center}
+h1{font:900 clamp(40px,10vw,96px)/1 ui-monospace,monospace;letter-spacing:.06em;margin:0;color:var(--accent);text-shadow:4px 4px 0 var(--accent2)}
+.tag{color:var(--mute);font-size:1.15rem;margin:12px 0 24px}
+.hero img{width:100%;max-width:960px;border:3px solid var(--line);border-radius:8px;image-rendering:pixelated;box-shadow:0 12px 48px #000a}
+.btn{display:inline-block;background:var(--accent);color:#1b1030;font:800 1.4rem ui-monospace,monospace;padding:14px 34px;border-radius:6px;text-decoration:none;margin:24px 8px 0;box-shadow:0 4px 0 #a86b00}
+.btn.alt{background:transparent;color:var(--ink);border:2px solid var(--line);box-shadow:none}
+section{padding:36px 0}
+h2{font:800 1.8rem ui-monospace,monospace;color:var(--accent);margin:0 0 16px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}
+figure{margin:0;background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+figure img{width:100%;display:block;image-rendering:pixelated}
+figcaption{padding:8px 12px;color:var(--mute);font-size:.9rem}
+ul.feat{columns:2 300px;padding-left:20px}
+table{width:100%;border-collapse:collapse;background:var(--panel);border-radius:8px;overflow:hidden}
+th,td{padding:10px 14px;text-align:left;border-bottom:1px solid var(--line)}
+th{color:var(--accent);font-family:ui-monospace,monospace}
+code{background:var(--panel);padding:2px 6px;border-radius:4px}
+pre{background:var(--panel);padding:14px;border-radius:8px;overflow:auto}
+footer{padding:32px 0;color:var(--mute);text-align:center;border-top:1px solid var(--line)}
+.about{background:var(--panel);border-left:4px solid var(--accent2);padding:16px 20px;border-radius:0 8px 8px 0}
+</style>
+</head>
+<body>
+<header class="hero"><div class="wrap">
+  <h1>CATXZZON</h1>
+  <p class="tag">Zaxxon, but you are the cat. Spray-cheese forcefields, space potatoes, Big Boss Jesse.</p>
+  <img src="img/citadel.png" alt="Major Marmalade flying over Cheddar Citadel" width="1280" height="720">
+  <div><a class="btn" href="play/">PLAY NOW</a><a class="btn alt" href="#downloads">Download</a></div>
+</div></header>
+
+<main class="wrap">
+<section>
+  <h2>The game</h2>
+  <p>An 80s isometric, diagonally scrolling shooter with altitude, set in the KÄSEKRIEG universe. You are Major Marmalade, a big orange tabby, and the cat <em>is</em> the spaceship. Raid Schloss Gorgonzola, a cheese castle held by grey-uniformed rats, cross the Spud Belt, and face Big Boss Jesse.</p>
+  <ul class="feat">
+    <li>Four stages with generated, ever-harder rounds</li>
+    <li>Altitude play: shadow, altimeter, gaps, force fields</li>
+    <li>Screen shake, hit-stop, combos, rainbow catnip mode</li>
+    <li>Every sprite drawn by code, every sound synthesized</li>
+    <li>Zero assets, zero runtime dependencies</li>
+    <li>Keyboard, gamepad and touch</li>
+  </ul>
+  <p><b>Controls:</b> arrows/WASD steer and climb or dive, Space/Z fire, X/Shift yarn bomb, P pause. <a href="https://github.com/bsommers/catxzzon/blob/main/docs/HOW-TO-PLAY.md">Full guide</a>.</p>
+</section>
+
+<section>
+  <h2>Screenshots</h2>
+  <div class="grid">
+    <figure><img src="img/title.png" alt="Title screen" loading="lazy"><figcaption>Title screen</figcaption></figure>
+    <figure><img src="img/spuds.png" alt="Spud Belt" loading="lazy"><figcaption>Spud Belt</figcaption></figure>
+    <figure><img src="img/keep.png" alt="Gorgonzola Keep" loading="lazy"><figcaption>Gorgonzola Keep</figcaption></figure>
+    <figure><img src="img/lair.png" alt="Jesse's Lair" loading="lazy"><figcaption>Jesse's Lair</figcaption></figure>
+  </div>
+</section>
+
+<section id="downloads">
+  <h2>Downloads</h2>
+  <p>Grab a build from <a href="https://github.com/bsommers/catxzzon/releases/latest">Releases</a>. Binaries are unsigned (macOS: right-click, Open).</p>
+  <table>
+    <tr><th>Platform</th><th>File</th><th>Notes</th></tr>
+    <tr><td>Browser</td><td><a href="play/">Play online</a></td><td>nothing to install</td></tr>
+    <tr><td>Any</td><td><a href="catxzzon.html">catxzzon.html</a></td><td>one 237 KB file, runs from <code>file://</code></td></tr>
+    <tr><td>Linux x64</td><td><code>catxzzon-&lt;ver&gt;-linux-x64.tar.gz</code></td><td>needs webkit2gtk 4.1, else opens your browser</td></tr>
+    <tr><td>Windows x64</td><td><code>catxzzon-&lt;ver&gt;-win-x64.zip</code></td><td>needs WebView2 (Windows 10/11)</td></tr>
+    <tr><td>macOS</td><td><code>catxzzon-&lt;ver&gt;-mac-{x64,arm64}.zip</code></td><td>contains CATXZZON.app</td></tr>
+  </table>
+  <p>From source, with only Node 22+: <code>git clone https://github.com/bsommers/catxzzon &amp;&amp; cd catxzzon &amp;&amp; npm start</code>.</p>
+</section>
+
+<section>
+  <h2>Built by a swarm</h2>
+  <p>Nineteen AI agents built CATXZZON in parallel from one binding contract, each owning its own files and reporting progress to a live tracker. Mistakes and the rules they produced are logged for the next swarm.</p>
+  <figure><img src="img/tracker.png" alt="Swarm tracker dashboard" loading="lazy"><figcaption>The swarm war room: timeline, roster and model usage</figcaption></figure>
+  <p><a href="https://github.com/bsommers/catxzzon/blob/main/docs/HOW-IT-WAS-MADE.md">How it was made</a> ·
+  <a href="https://github.com/bsommers/catxzzon/blob/main/docs/LEARNINGS.md">Learnings</a> ·
+  <a href="https://github.com/bsommers/catxzzon/blob/main/docs/ARCH-OVERVIEW.md">Architecture</a> ·
+  <a href="https://github.com/bsommers/catxzzon/tree/main/docs/swarm/reports">Agent reports</a></p>
+</section>
+
+<section>
+  <h2>About Jesse</h2>
+  <div class="about"><p>This game is for Jesse. Jesse is the Big Boss at the end of the castle: the one who laughs at your mistakes, throws cheese walls and homing missiles, and taunts you between lives. Beat him, and the cheese is yours.</p></div>
+</section>
+</main>
+<footer><div class="wrap">CATXZZON · Apache-2.0 · <a href="https://github.com/bsommers/catxzzon">GitHub</a> · For Jesse</div></footer>
+</body>
+</html>

@@ -119,7 +119,7 @@ export function makeDemoGame(opts = {}) {
     if (fxT <= 0) {
       fxT = 0.55;
       const x = 30 + ((t * 97) % 170), y = g.scrollY + 120 + ((t * 61) % 240), z = 10 + ((t * 43) % 60);
-      bus.emit('fx', { type: ['boom_small', 'crumbs', 'spark', 'smoke', 'splat', 'ring'][Math.floor(t * 3) % 6], x, y, z });
+      bus.emit('fx', { type: ['boom_small', 'crumbs', 'spark', 'smoke', 'splat', 'ring'][Math.floor(t * 3) % 6], x, y, z, opts: {} });
       bus.emit('popup', { text: String(100 * (1 + (Math.floor(t) % 5))), x, y, z: z + 10, color: '#ffe14a' });
     }
     if (bigT <= 0) {

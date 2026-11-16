@@ -28,14 +28,14 @@ function fieldOnAt(e, t) {
 function targetAt(tgt, y) {
   const ch = tgt.chain;
   if (!ch) return tgt;
-  const rear = y - PB.d / 2;
-  for (let i = 0; i < ch.length; i++) if (rear < ch[i].end) return ch[i];
+  for (let i = 0; i < ch.length; i++) if (y < ch[i].y) return ch[i];
   return ch[ch.length - 1];
 }
 
 export function createAutopilot(game, opts = {}) {
   const skill = clamp(opts.skill ?? 1, 0, 1);
   const rnd = mulberry(((game && game.seed) | 0) ^ 0x9e3779b9 ^ Math.round(skill * 1000));
+  const rowCache = new Map(); let cacheStage = null;
   const prev = new Map();                 // ent id -> [x,y,z] last tick (for velocity)
   let lastT = -1, lastScroll = 0, scrollV = TUNING.baseSpeed;
   let lastMove = MOVES[0], hold = { dx: 0, dz: 0 }, holdN = 0, bombCd = 0, lastTarget = null;
@@ -45,27 +45,49 @@ export function createAutopilot(game, opts = {}) {
   const rowsLook = 1 + Math.round(skill * 5);
 
   // ---------- planning through wall gaps ----------
-  function blockedGrid(g, cy, fieldsByRow) {
-    // returns Uint8Array [cx*8+cz] = 1 if the player box centred in that cell touches a voxel/field
-    const out = new Uint8Array(FIELD_CELLS_X * FIELD_CELLS_Z);
-    const rowCells = g.grid.rows(cy);
-    for (let i = 0; i < rowCells.length; i++) {
-      const c = rowCells[i];
-      if (c.cx >= 0 && c.cx < FIELD_CELLS_X && c.cz >= 0 && c.cz < FIELD_CELLS_Z) out[c.cx * FIELD_CELLS_Z + c.cz] = 1;
-    }
-    const fl = fieldsByRow.get(cy);
-    if (fl) for (const f of fl) {
-      for (let cx = 0; cx < FIELD_CELLS_X; cx++) for (let cz = 0; cz < FIELD_CELLS_Z; cz++) {
-        const px = cx * CELL + CELL / 2, pz = clamp(cz * CELL + (CELL - PB.h) / 2, TUNING.zMin, TUNING.zMax);
-        if (Math.abs(px - f.x) * 2 < PB.w + f.w && pz < f.z + f.h && f.z < pz + PB.h) out[cx * FIELD_CELLS_Z + cz] = 1;
+  // Fine (x,z) lattice per blocked row; backward boolean DP (feasible = free here AND reachable-to a feasible cell in the next row,
+  // via separable box dilation), then a forward greedy walk picks the least-effort feasible chain from the player's position.
+  const SX = 4, SZ = 4, NXS = Math.floor((TUNING.xMax - TUNING.xMin) / SX) + 1, NZS = Math.floor((TUNING.zMax - TUNING.zMin) / SZ) + 1;
+  const xOf = (i) => TUNING.xMin + i * SX, zOf = (j) => TUNING.zMin + j * SZ;
+
+  function rowFree(g, cy, fields) {
+    const out = new Uint8Array(NXS * NZS);
+    const rc = g.grid.rows(cy);
+    const blk = new Uint8Array(FIELD_CELLS_X * 16);
+    for (let i = 0; i < rc.length; i++) { const c = rc[i]; if (c.cx >= 0 && c.cx < FIELD_CELLS_X && c.cz >= 0 && c.cz < 16) blk[c.cx * 16 + c.cz] = 1; }
+    for (let i = 0; i < NXS; i++) {
+      const x = xOf(i), cx0 = Math.floor((x - PB.w / 2 + 0.9) / CELL), cx1 = Math.floor((x + PB.w / 2 - 0.9) / CELL);
+      for (let j = 0; j < NZS; j++) {
+        const z = zOf(j), cz0 = Math.floor((z + 0.9) / CELL), cz1 = Math.floor((z + PB.h - 0.9) / CELL);
+        let ok = 1;
+        for (let cx = cx0; ok && cx <= cx1; cx++) for (let cz = cz0; cz <= cz1; cz++) if (cx >= 0 && cx < FIELD_CELLS_X && blk[cx * 16 + cz]) { ok = 0; break; }
+        if (ok && fields) for (const f of fields) {
+          if (Math.abs(x - f.x) * 2 < PB.w + f.w + 1 && z - 0.5 < f.z + f.h && f.z - 0.5 < z + PB.h) { ok = 0; break; }
+        }
+        out[i * NZS + j] = ok;
       }
     }
     return out;
   }
-  const cellPos = (cx, cz) => [cx * CELL + CELL / 2, clamp(cz * CELL + (CELL - PB.h) / 2, TUNING.zMin, TUNING.zMax)];
+  /** D[i][j] = 1 if any set cell of `m` lies within +-wx,+-wz lattice steps. */
+  function dilate(m, wx, wz) {
+    const tmp = new Uint8Array(NXS * NZS), out = new Uint8Array(NXS * NZS);
+    for (let j = 0; j < NZS; j++) {           // along x
+      let acc = 0; const pre = new Int32Array(NXS + 1);
+      for (let i = 0; i < NXS; i++) { acc += m[i * NZS + j]; pre[i + 1] = acc; }
+      for (let i = 0; i < NXS; i++) tmp[i * NZS + j] = pre[Math.min(NXS, i + wx + 1)] - pre[Math.max(0, i - wx)] > 0 ? 1 : 0;
+    }
+    for (let i = 0; i < NXS; i++) {           // along z
+      let acc = 0; const pre = new Int32Array(NZS + 1);
+      for (let j = 0; j < NZS; j++) { acc += tmp[i * NZS + j]; pre[j + 1] = acc; }
+      for (let j = 0; j < NZS; j++) out[i * NZS + j] = pre[Math.min(NZS, j + wz + 1)] - pre[Math.max(0, j - wz)] > 0 ? 1 : 0;
+    }
+    return out;
+  }
 
   function planGap(g, p) {
     const gr = g.grid;
+    if (cacheStage !== gr) { rowCache.clear(); cacheStage = gr; }
     const fieldsByRow = new Map();
     for (const e of g.ents) {
       if (e.dead || e.kind !== 'field' || e.pulse > 0 || e.on === false) continue;
@@ -75,88 +97,72 @@ export function createAutopilot(game, opts = {}) {
       fieldsByRow.get(cy).push(e);
     }
     const cyStart = Math.floor((p.y - PB.d / 2) / CELL);
-    const cyEnd = cyStart + 28;
     const rows = [];
-    for (let cy = cyStart; cy <= cyEnd && rows.length < rowsLook + 2; cy++) {
+    for (let cy = cyStart; cy <= cyStart + 28 && rows.length < rowsLook + 2; cy++) {
       if (gr.rows(cy).length === 0 && !fieldsByRow.has(cy)) continue;
-      rows.push({ cy, blk: blockedGrid(g, cy, fieldsByRow) });
+      const fl = fieldsByRow.get(cy);
+      const key = cy + ':' + (fl ? fl.map((f) => f.id).join(',') : '');
+      let free = rowCache.get(key);
+      if (!free) { free = rowFree(g, cy, fl); rowCache.set(key, free); if (rowCache.size > 200) rowCache.delete(rowCache.keys().next().value); }
+      rows.push({ cy, free });
     }
     if (!rows.length) return null;
     const spd = Math.max(scrollV, 30);
-    const N = FIELD_CELLS_X * FIELD_CELLS_Z, INF = 1e9;
-    let slack = 1;
-    const trav = (ax, az, bx, bz, dy) => {
-      const t = Math.max(0, dy) / spd * slack;
-      const needX = Math.abs(ax - bx) - 5, needZ = Math.abs(az - bz) - 7;   // cell regions leave a few units of play
-      if (needX > TUNING.moveX * t || needZ > TUNING.moveZ * t) return INF;
-      return Math.abs(ax - bx) / TUNING.moveX + Math.abs(az - bz) / TUNING.moveZ;
-    };
-    const solve = (K) => {
-      const cost = [], nxt = [];
+    // lattice reach window between row i and i+1 (centre to centre; the body is only inside a row for a short time)
+    const win = (t, slack) => [Math.floor(TUNING.moveX * t * slack / SX), Math.floor(TUNING.moveZ * t * slack / SZ)];
+    const D = PB.d - 1.8, IN_T = (CELL + D) / spd;                      // time the body takes to cross one row
+    const solve = (K, slack) => {
+      // E[i]: feasible positions when the nose enters row i; X[i]: when the tail leaves it (free in row i, reachable on to the next row)
+      const E = new Array(K), X = new Array(K);
+      const and = (f, d) => { const o = new Uint8Array(NXS * NZS); for (let q = 0; q < o.length; q++) o[q] = f[q] & d[q]; return o; };
+      const [iwx, iwz] = win(IN_T, slack);
       for (let i = K - 1; i >= 0; i--) {
-        const ci = new Float64Array(N).fill(INF), ni = new Int16Array(N).fill(-1);
-        for (let c = 0; c < N; c++) {
-          if (rows[i].blk[c]) continue;
-          if (i === K - 1) { ci[c] = 0; continue; }
-          const [ax, az] = cellPos((c / FIELD_CELLS_Z) | 0, c % FIELD_CELLS_Z);
-          const dy = (rows[i + 1].cy - rows[i].cy) * CELL - 28;   // free travel distance between leaving row i and entering row i+1
-          let best = INF, bn = -1;
-          for (let d = 0; d < N; d++) {
-            if (rows[i + 1].blk[d] || cost[0][d] >= INF) continue;
-            const [bx, bz] = cellPos((d / FIELD_CELLS_Z) | 0, d % FIELD_CELLS_Z);
-            const tc = trav(ax, az, bx, bz, dy);
-            if (tc >= INF) continue;
-            const v = tc + cost[0][d];
-            if (v < best) { best = v; bn = d; }
+        if (i === K - 1) X[i] = rows[i].free;
+        else { const [wx, wz] = win(Math.max(0, (rows[i + 1].cy - rows[i].cy) * CELL - CELL - D) / spd, slack); X[i] = and(rows[i].free, dilate(E[i + 1], wx, wz)); }
+        E[i] = and(rows[i].free, dilate(X[i], iwx, iwz));
+      }
+      const chain = [];
+      let cx = p.x, cz = p.z;
+      const pick = (set, wx, wz) => {
+        const ax = (wx + 1) * SX, az = (wz + 1) * SZ;
+        let best = -1, bv = 1e9;
+        for (let a = 0; a < NXS; a++) {
+          const x = xOf(a); if (Math.abs(x - cx) > ax) continue;
+          for (let b = 0; b < NZS; b++) {
+            if (!set[a * NZS + b]) continue;
+            const z = zOf(b); if (Math.abs(z - cz) > az) continue;
+            const v = Math.abs(x - cx) / TUNING.moveX + Math.abs(z - cz) / TUNING.moveZ;
+            if (v < bv) { bv = v; best = a * NZS + b; }
           }
-          ci[c] = best; ni[c] = bn;
         }
-        cost.unshift(ci); nxt.unshift(ni);
+        if (best < 0) return false;
+        cx = xOf((best / NZS) | 0); cz = zOf(best % NZS);
+        return true;
+      };
+      for (let i = 0; i < K; i++) {
+        const yIn = rows[i].cy * CELL - D / 2, yOut = (rows[i].cy + 1) * CELL + D / 2;
+        const tIn = i === 0 ? Math.max(0, yIn - p.y) / spd : Math.max(0, yIn - ((rows[i - 1].cy + 1) * CELL + D / 2)) / spd;
+        const [wx, wz] = win(tIn, slack);
+        if (!pick(E[i], wx, wz)) return null;
+        chain.push({ y: yIn, x: cx, z: cz });
+        if (!pick(X[i], iwx, iwz)) return null;
+        chain.push({ y: yOut, x: cx, z: cz });
       }
-      // first hop from the player
-      const dy0 = rows[0].cy * CELL - (p.y + PB.d / 2);
-      let best = INF, bc = -1;
-      for (let c = 0; c < N; c++) {
-        if (cost[0][c] >= INF) continue;
-        const [bx, bz] = cellPos((c / FIELD_CELLS_Z) | 0, c % FIELD_CELLS_Z);
-        const tc = trav(p.x, p.z, bx, bz, dy0);
-        if (tc >= INF) continue;
-        const v = tc + cost[0][c];
-        if (v < best) { best = v; bc = c; }
-      }
-      return bc >= 0 ? { bc, nxt } : null;
+      return chain;
     };
-    let K = Math.min(rows.length, rowsLook), bc = -1, sol = null;
-    for (; K >= 1; K--) { slack = 0.6; sol = solve(K); if (!sol) { slack = 1; sol = solve(K); } if (sol) { bc = sol.bc; break; } }
-    if (bc < 0) {                       // unreachable: head for the nearest free cell of the first row
-      let bd = 1e9;
-      for (let c = 0; c < N; c++) {
-        if (rows[0].blk[c]) continue;
-        const [bx, bz] = cellPos((c / FIELD_CELLS_Z) | 0, c % FIELD_CELLS_Z);
-        const d = Math.abs(bx - p.x) / TUNING.moveX + Math.abs(bz - p.z) / TUNING.moveZ;
-        if (d < bd) { bd = d; bc = c; }
+    let K = Math.min(rows.length, rowsLook), chain = null;
+    for (; K >= 1 && !chain; K--) chain = solve(K, 0.85) || solve(K, 1.0);
+    if (!chain) {                       // unreachable: head for the nearest free lattice point of the first row
+      let bd = 1e9, bi = -1;
+      for (let q = 0; q < NXS * NZS; q++) {
+        if (!rows[0].free[q]) continue;
+        const d = Math.abs(xOf((q / NZS) | 0) - p.x) / TUNING.moveX + Math.abs(zOf(q % NZS) - p.z) / TUNING.moveZ;
+        if (d < bd) { bd = d; bi = q; }
       }
-      if (bc < 0) return null;
+      if (bi < 0) return null;
+      chain = [{ y: (rows[0].cy + 1) * CELL + PB.d / 2, x: xOf((bi / NZS) | 0), z: zOf(bi % NZS) }];
     }
-    if (K < 1) K = 1;
-    // chain of per-row targets; each is aimed inside its cell at the point closest to the next row's cell (pre-positioning)
-    const chain = [];
-    let c = bc;
-    for (let j = 0; j < K && c >= 0; j++) {
-      const cxo = (c / FIELD_CELLS_Z) | 0, czo = c % FIELD_CELLS_Z;
-      const [cx0, cz0] = cellPos(cxo, czo);
-      const nc = sol && j < K - 1 ? sol.nxt[j][c] : -1;
-      let tx = cx0, tz = cz0;
-      if (nc >= 0) {
-        const [nx, nz] = cellPos((nc / FIELD_CELLS_Z) | 0, nc % FIELD_CELLS_Z);
-        const mx = (CELL - PB.w) / 2 - 1, mz = (CELL - PB.h) / 2 - 1;
-        tx = clamp(nx, cx0 - mx, cx0 + mx); tz = clamp(nz, cz0 - mz, cz0 + mz);
-      }
-      chain.push({ end: (rows[j].cy + 1) * CELL, x: tx, z: clamp(tz, TUNING.zMin, TUNING.zMax) });
-      c = nc;
-    }
-    const tx = chain[0].x, tz = chain[0].z;
-    return { x: tx, z: tz, dy: rows[0].cy * CELL - p.y, lock: true, K, chain, rows: rows.map((r) => r.cy) };
+    return { x: chain[0].x, z: chain[0].z, dy: rows[0].cy * CELL - p.y, lock: true, K, chain, rows: rows.map((r) => r.cy) };
   }
 
   // ---------- opportunistic target (no wall near): pickups, fuel tins, enemies ----------
@@ -216,7 +222,7 @@ export function createAutopilot(game, opts = {}) {
       z = clamp(z + mz * TUNING.moveZ * h, TUNING.zMin, TUNING.zMax);
       const t = k * h, y = p.y + sv * (t - h * 0.8);   // the game checks collisions before the scroll advance
       const w = 1 + (steps - k) / steps;     // nearer in time = worse
-      if (g.grid.boxHit(x - PB.w / 2 + 0.6, x + PB.w / 2 - 0.6, y - PB.d / 2 + 0.6, y + PB.d / 2 - 0.6, z + 0.6, z + PB.h - 0.6)) { cost += 4000 * w; continue; }
+      if (g.grid.boxHit(x - PB.w / 2 + 0.9, x + PB.w / 2 - 0.9, y - PB.d / 2 + 0.9, y + PB.d / 2 - 0.9, z + 0.9, z + PB.h - 0.9)) { cost += 4000 * w; continue; }
       for (let i = 0; i < hz.length; i++) {
         const q = hz[i], e = q.e;
         if (q.field && !fieldOnAt(e, t)) continue;

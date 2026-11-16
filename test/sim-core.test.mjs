@@ -127,7 +127,7 @@ test('yarn bomb: radius damage, boss takes 10, bombs counted, edge-triggered', (
   // place everything right ahead of the shell's burst point
   for (const e of g.ents) { e.y = g.player.y + 232; e.z = 18; }
   g.ents.find((e) => e.kind === 'mousejet').x = 112 + 40;
-  g.ents.find((e) => e.z === 120).x = 112 - 200; // out of radius (and field), survives
+  g.ents.filter((e) => e.kind === 'turret')[1].x = 112 - 200; // out of radius (and field), survives
   const boss = g.ents.find((e) => e.kind === 'boss'); boss.y = g.player.y + 400;
   assert.equal(g.bombs, TUNING.bombs);
   g.update(DT, { ...IDLE, bomb: true }); g.update(DT, { ...IDLE, bomb: true });
@@ -135,6 +135,7 @@ test('yarn bomb: radius damage, boss takes 10, bombs counted, edge-triggered', (
   run(g, 2);
   assert.equal(bus.count('bomb'), 1);
   assert.ok(!g.ents.some((e) => e.kind === 'mousejet'));
+  assert.equal(g.ents.filter((e) => e.kind === 'turret').length, 1, 'only the out-of-radius turret survives');
   // boss bomb
   g.bombs = 1; boss.y = g.player.y + 120; boss.x = g.player.x; boss.z = g.player.z - 20;
   const hp = boss.hp;
@@ -314,4 +315,23 @@ test('fallback stages exist for all stages and run a full round headless without
   const g = createGame({ seed: 5, bus: recBus(), behaviors: {}, bossBehavior: null, buildStage: fallbackStage, lives: 99 });
   for (let i = 0; i < 60 * 240; i++) { g.update(DT, { dx: 0, dz: 0, fire: true, bomb: false }); if (g.player.alive) g.player.invuln = 1; }
   assert.ok(g.stageIdx >= 2 || g.round > 1, `stage ${g.stageIdx}`);
+});
+
+test('integration: real levels (if present) drive a full round deterministically', async (t) => {
+  let buildStage;
+  try { ({ buildStage } = await import('../src/levels/index.js')); } catch { t.skip('levels not available'); return; }
+  const play = () => {
+    const g = createGame({ seed: 4, bus: recBus(), buildStage, lives: 99, behaviors: {}, bossBehavior: null });
+    const states = new Set();
+    for (let i = 0; i < 60 * 300; i++) {
+      g.update(DT, { dx: Math.sin(i / 40), dz: Math.cos(i / 60), fire: true, bomb: false });
+      if (g.player.alive) g.player.invuln = 1;
+      if (g.state === 'play' && g.boss && !g.boss.dead && i % 30 === 0) g.hurt(g.boss, 2, g.player);
+      states.add(g.stageIdx + ':' + g.state);
+    }
+    return { h: g.snapshotHash(), states, round: g.round };
+  };
+  const a = play(), b = play();
+  assert.equal(a.h, b.h);
+  assert.ok(a.states.has('3:victory') && a.round >= 2, [...a.states].join(' '));
 });

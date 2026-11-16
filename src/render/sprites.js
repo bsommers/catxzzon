@@ -155,16 +155,50 @@ export function createSprites(artRef, mk) {
     project(x, y, z0, 0, P);
     const sx = Math.round(P.sx + cdx), sy = Math.round(P.sy + cdy);
     ctx.beginPath(); ctx.ellipse(sx, sy, rx, rx * 0.5, 0, 0, TAU);
-    ctx.fillStyle = space ? 'rgba(140,230,255,0.16)' : 'rgba(16,6,34,0.50)'; ctx.fill();
-    ctx.lineWidth = 1; ctx.strokeStyle = space ? 'rgba(170,240,255,0.55)' : 'rgba(255,240,200,0.22)'; ctx.stroke();
+    ctx.fillStyle = space ? 'rgba(140,230,255,0.18)' : 'rgba(16,6,34,0.56)'; ctx.fill();
+    ctx.lineWidth = 1; ctx.strokeStyle = space ? 'rgba(170,240,255,0.70)' : 'rgba(255,238,190,0.46)'; ctx.stroke();
+    ctx.fillStyle = space ? 'rgba(220,250,255,0.85)' : 'rgba(255,244,210,0.62)';           // centre pip: exact (x,y) under the cat
+    ctx.fillRect(sx - 1, sy, 3, 1); ctx.fillRect(sx, sy - 1, 1, 3);
+  }
+  /**
+   * Fly-through reticle on the plane y of the next wall / cheese field: the cat's box cross-section drawn as corner
+   * brackets (mint = it fits through, red + pulsing = it will hit). a = 0..1 opacity.
+   */
+  function gateMarker(ctx, x, y, z, w, h, cdx, cdy, blocked, a, t) {
+    const g = 3 + (blocked ? 1.5 * (0.5 + 0.5 * Math.sin(t * 15)) : 0.6 * Math.sin(t * 5));
+    project(x - w / 2 - g, y, z - g, 0, P); project(x + w / 2 + g, y, z + h + g, 0, Q);
+    const x0 = Math.round(P.sx + cdx) + 0.5, x1 = Math.round(Q.sx + cdx) + 0.5;
+    const yb0 = Math.round(P.sy + cdy) + 0.5;                       // bottom-left corner
+    project(x + w / 2 + g, y, z - g, 0, P);
+    const yb1 = Math.round(P.sy + cdy) + 0.5, yt1 = Math.round(Q.sy + cdy) + 0.5, yt0 = yt1 - (yb1 - yb0);
+    const lx = Math.max(3, Math.round((x1 - x0) * 0.32)), ly = lx * (yb1 - yb0) / (x1 - x0 || 1), lz = Math.max(3, Math.round((yb0 - yt0) * 0.32));
+    const path = () => {
+      ctx.beginPath();
+      ctx.moveTo(x0 + lx, yb0 + ly); ctx.lineTo(x0, yb0); ctx.lineTo(x0, yb0 - lz);
+      ctx.moveTo(x0, yt0 + lz); ctx.lineTo(x0, yt0); ctx.lineTo(x0 + lx, yt0 + ly);
+      ctx.moveTo(x1 - lx, yt1 - ly); ctx.lineTo(x1, yt1); ctx.lineTo(x1, yt1 + lz);
+      ctx.moveTo(x1, yb1 - lz); ctx.lineTo(x1, yb1); ctx.lineTo(x1 - lx, yb1 - ly);
+    };
+    ctx.lineJoin = 'miter'; ctx.lineCap = 'butt';
+    ctx.globalAlpha = a * (blocked ? 0.26 : 0.18);
+    ctx.fillStyle = blocked ? '#ff4030' : '#60ffc0';
+    ctx.beginPath(); ctx.moveTo(x0, yb0); ctx.lineTo(x0, yt0); ctx.lineTo(x1, yt1); ctx.lineTo(x1, yb1); ctx.closePath(); ctx.fill();
+    ctx.globalAlpha = a * 0.6; path(); ctx.lineWidth = 3; ctx.strokeStyle = '#12061e'; ctx.stroke();
+    ctx.globalAlpha = a; path(); ctx.lineWidth = 1; ctx.strokeStyle = blocked ? '#ff7a52' : '#a8ffe0'; ctx.stroke();
+    if (blocked) {                                                  // a small cross in the middle: "no"
+      const mx = Math.round((x0 + x1) / 2), my = Math.round((yb0 + yt1) / 2);
+      ctx.fillStyle = '#ff6a4a';
+      for (let i = -2; i <= 2; i++) { ctx.fillRect(mx + i, my + i, 1, 1); ctx.fillRect(mx + i, my - i, 1, 1); }
+    }
+    ctx.globalAlpha = 1;
   }
   /** One piece of the altitude line from z = za up to zb at (x,y): thin dotted ruler with a tick every 16 units. */
   function altSegment(ctx, x, y, za, zb, cdx, cdy) {
     project(x, y, za, 0, P); project(x, y, zb, 0, Q);
     const sx = Math.round(P.sx + cdx), y0 = Math.round(Q.sy + cdy), y1 = Math.round(P.sy + cdy);
-    ctx.fillStyle = 'rgba(255,246,214,0.42)';
+    ctx.fillStyle = 'rgba(255,246,214,0.62)';
     for (let yy = y0; yy < y1; yy += 2) ctx.fillRect(sx, yy, 1, 1);
-    if (Math.round(za) % 16 === 0 && za > 0) { ctx.fillStyle = 'rgba(255,246,214,0.6)'; ctx.fillRect(sx - 1, y1, 3, 1); }
+    if (Math.round(za) % 16 === 0 && za > 0) { ctx.fillStyle = 'rgba(255,246,214,0.85)'; ctx.fillRect(sx - 1, y1, 3, 1); }
   }
 
   // ---- spray-cheese strands ------------------------------------------------------------------------------------
@@ -265,7 +299,7 @@ export function createSprites(artRef, mk) {
     }
     ctx.globalAlpha = 1;
   }
-  return { drawSprite, white, shadowPath, playerShadow, altSegment, strandSlice, strandBloom, post, pole, rainbowTrail };
+  return { drawSprite, white, shadowPath, playerShadow, gateMarker, altSegment, strandSlice, strandBloom, post, pole, rainbowTrail };
 }
 
 /** Box (w,d,h) of an entity, falling back to its KINDS row. */

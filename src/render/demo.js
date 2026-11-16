@@ -87,6 +87,14 @@ export function makeDemoGame(opts = {}) {
   if (kind === 'space') for (let i = 0; i < 14; i++) spuds.push(spawn('spud', { x: 20 + ((i * 53) % 190), y: 120 + i * 70, z: 20 + ((i * 37) % 90), ang: i, small: i % 5 === 4, heat: (i % 4) / 3 }));
   const boss = kind === 'boss' ? spawn('boss', { x: FIELD_W / 2, y: 330, z: 0 }) : null;
   const missiles = boss ? [spawn('bossmissile', {}), spawn('bossmissile', {})] : [];
+  const crowd = [];
+  if (opts.stress) {                                  // perf harness (?stress=2): ~3000 drawn voxels + ~400 live sprites
+    for (let cy = 8; cy < 320; cy += 2) for (let cx = 0; cx < 14; cx++) {
+      if (cx === (cy >> 1) % 14 || cx === ((cy >> 1) + 1) % 14) continue;
+      for (let cz = 0; cz < 5 * opts.stress + (cy % 4); cz++) stage.cells.push({ cx, cy, cz, t: 1 });
+    }
+    for (let i = 0; i < 370; i++) crowd.push(spawn(i % 3 ? 'hairball' : 'cheeseball', { ph: i }));
+  }
   let fxT = 0.4, bigT = 2.6;
 
   g.step = (dt) => {
@@ -115,6 +123,10 @@ export function makeDemoGame(opts = {}) {
       missiles.forEach((m, i) => { const u = (t * 0.25 + i * 0.5) % 1; m.x = boss.x + (i ? 40 : -40) * (1 - u); m.y = boss.y - u * 260; m.z = 40 + 30 * Math.sin(u * 6); });
       g.bossHp01 = 0.5 + 0.4 * Math.sin(t * 0.3);
     }
+    for (let i = 0; i < crowd.length; i++) {
+      const e = crowd[i];
+      e.x = 8 + ((i * 37.7 + t * (9 + (i % 7))) % (FIELD_W - 16)); e.y = g.scrollY - 30 + ((i * 53.3 + t * 40) % 420); e.z = 20 + ((i * 29) % 100) + 6 * Math.sin(t * 3 + i);
+    }
     fxT -= dt; bigT -= dt;
     if (fxT <= 0) {
       fxT = 0.55;
@@ -137,7 +149,7 @@ export async function runDemo(canvas, q = new URLSearchParams(typeof location !=
   const [{ createRenderer }, { buildAll }] = await Promise.all([import('./renderer.js'), import('../art/registry.js')]);
   const bus = createBus(), art = buildAll();
   const renderer = createRenderer(canvas, { bus, art, crt: q.get('crt') === '1', hud: q.get('hud') === '0' ? false : 'auto' });
-  const game = makeDemoGame({ stage: q.get('stage') || 'fortress', bus, nip: q.get('nip') === '1', lowFuel: q.get('lowfuel') === '1', juice: q.get('juice') !== '0' });
+  const game = makeDemoGame({ stage: q.get('stage') || 'fortress', bus, nip: q.get('nip') === '1', lowFuel: q.get('lowfuel') === '1', juice: q.get('juice') !== '0', stress: Math.max(0, Math.min(4, parseInt(q.get('stress') || '0', 10) || 0)) });
   await Promise.all([art.ready, renderer.ready]);
   const STEP = 1 / 60, T = parseFloat(q.get('t') || '0') || 0, n = Math.round(T / STEP), lead = Math.min(n, 90);
   let clockMs = 1000;

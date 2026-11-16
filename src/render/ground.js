@@ -165,10 +165,10 @@ export function createGround(artRef, mk) {
     for (let i = 0; i <= 4; i++) {
       const x = (FIELD_W * i) / 4, edge = i === 0 || i === 4;
       project(x, y0, 0, camY, a); project(x, y1, 0, camY, b);
-      ctx.strokeStyle = edge ? 'rgba(130,220,255,0.26)' : 'rgba(130,200,255,0.09)';
+      ctx.strokeStyle = edge ? 'rgba(130,220,255,0.40)' : 'rgba(130,200,255,0.15)';
       ctx.beginPath(); ctx.moveTo(a.sx, a.sy + 0.5); ctx.lineTo(b.sx, b.sy + 0.5); ctx.stroke();
     }
-    const step = 64, pulse = 0.07 + 0.03 * Math.sin(t * 2);
+    const step = 64, pulse = 0.13 + 0.04 * Math.sin(t * 2);
     ctx.strokeStyle = `rgba(170,150,255,${pulse.toFixed(3)})`;
     ctx.beginPath();
     for (let y = Math.ceil(y0 / step) * step; y <= y1; y += step) {

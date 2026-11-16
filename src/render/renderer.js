@@ -97,8 +97,8 @@ export function createRenderer(canvas, opts = {}) {
       g.fillStyle = gr; g.fillRect(0, 0, W, H);
       return c;
     };
-    const scan = radial('rgba(0,0,0,0)', 'rgba(0,0,0,0.62)', H * 0.5, W * 0.66), sg = scan.getContext('2d');
-    sg.fillStyle = 'rgba(0,0,0,0.19)';
+    const scan = radial('rgba(0,0,0,0)', 'rgba(0,0,0,0.42)', H * 0.56, W * 0.68), sg = scan.getContext('2d');
+    sg.fillStyle = 'rgba(0,0,0,0.12)';
     for (let y = 1; y < H; y += 2) sg.fillRect(0, y, W, 1);
     sg.fillStyle = 'rgba(255,255,255,0.022)';
     for (let y = 0; y < H; y += 2) sg.fillRect(0, y, W, 1);
@@ -120,7 +120,7 @@ export function createRenderer(canvas, opts = {}) {
     if (dpv < 0) { nx = -nx; ny = -ny; dpv = -dpv; }
     const line = (v0, v1) => wctx.createLinearGradient(M + o.sx + vx * v0, M + o.sy + vy * v0, M + o.sx + vx * v0 + nx * dpv * (v1 - v0), M + o.sy + vy * v0 + ny * dpv * (v1 - v0));
     fogGrad = line(FOG_START, FOG_END);
-    fogGrad.addColorStop(0, `rgba(${c[0]},${c[1]},${c[2]},0)`); fogGrad.addColorStop(0.55, `rgba(${c[0]},${c[1]},${c[2]},0.34)`); fogGrad.addColorStop(1, `rgba(${c[0]},${c[1]},${c[2]},0.72)`);
+    fogGrad.addColorStop(0, `rgba(${c[0]},${c[1]},${c[2]},0)`); fogGrad.addColorStop(0.55, `rgba(${c[0]},${c[1]},${c[2]},0.26)`); fogGrad.addColorStop(1, `rgba(${c[0]},${c[1]},${c[2]},0.62)`);
     fadeGrad = line(FADE_START, FOG_END);
     fadeGrad.addColorStop(0, 'rgba(0,0,0,0)'); fadeGrad.addColorStop(1, 'rgba(0,0,0,1)');
     lightGrad = wctx.createLinearGradient(M, M, M + W * 0.8, M + H);
@@ -198,7 +198,7 @@ export function createRenderer(canvas, opts = {}) {
     const b = post.bloom.getContext('2d');
     b.imageSmoothingEnabled = true; b.globalCompositeOperation = 'copy'; b.drawImage(canvas, 0, 0, W / 4, H / 4);
     ctx.save();
-    ctx.imageSmoothingEnabled = true; ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 0.2;
+    ctx.imageSmoothingEnabled = true; ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 0.24;
     ctx.drawImage(post.bloom, 0, 0, W, H);
     ctx.restore();
     ctx.imageSmoothingEnabled = false;

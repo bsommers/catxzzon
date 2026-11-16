@@ -8,9 +8,10 @@ import { createGround, GROUND_ROWS_BEHIND, GROUND_ROWS_AHEAD } from './ground.js
 import { createSprites, frameOf, catFrame, spriteTopLeft, fieldGeom, fieldLevel, boxOf } from './sprites.js';
 
 const W = VIEW.W, H = VIEW.H;
-const T_SPRITE = 1, T_STRAND = 2, T_POST = 3, T_SHADOW = 4, T_ALT = 5, T_TRAIL = 6, T_PSHADOW = 7, T_POLE = 8;
+const T_SPRITE = 1, T_STRAND = 2, T_POST = 3, T_SHADOW = 4, T_ALT = 5, T_TRAIL = 6, T_PSHADOW = 7, T_POLE = 8, T_GATE = 9;
 const SHADOW = 'rgba(16,6,34,0.34)', SHADOW_SPACE = 'rgba(140,220,255,0.10)';
 const TRAIL_LIFE = 0.5, FLASH = 0.09, EMPTY = [];
+const GATE_RANGE = 184, GATE_FADE = 56, GATE_MIN_COLS = 5, GATE = { y: 0, blocked: false };
 const A0 = { sx: 0, sy: 0 }, A1 = { sx: 0, sy: 0 }, TL = { x: 0, y: 0 }, BOX = {};
 
 export function createScene(artRef, mk) {
@@ -36,6 +37,46 @@ export function createScene(artRef, mk) {
     return d;
   }
   function reset() { hist.length = 0; lastT = NaN; scrollV = 0; pstate.seen = false; }
+
+  // ---- fly-through reticle: the next wall row / live cheese field ahead of the cat --------------------------------
+  let colsVox = null; const colsCache = new Map();
+  /** Number of columns of row cy holding at least one voxel (a "wall" spans >= GATE_MIN_COLS of the 14). */
+  function wallCols(cy) {
+    if (colsVox !== vox) { colsVox = vox; colsCache.clear(); }
+    let n = colsCache.get(cy);
+    if (n === undefined) { n = 0; for (let cx = 0; cx < 32; cx++) if (vox.heights.has(cy * 32 + cx)) n++; colsCache.set(cy, n); }
+    return n;
+  }
+  /**
+   * Nearest obstacle plane within GATE_RANGE ahead of the cat box (x,y,z = box bottom centre): a wall-like voxel row
+   * or a live field overlapping the cat's x. Fills GATE { y, blocked } and returns it, or null when the way is open.
+   * Uses the sim's collision box (TUNING.playerBox, 1 unit of grace) so "mint" really means "fits".
+   */
+  function findGate(x, y, z, pb) {
+    const front = y + pb.d / 2, x0 = x - pb.w / 2 + 1, x1 = x + pb.w / 2 - 1, z0 = z + 1, z1 = z + pb.h - 1;
+    let best = Infinity, blocked = false;
+    if (vox && vox.count) {
+      const c0 = Math.floor(front / CELL) + 1, c1 = c0 + Math.ceil(GATE_RANGE / CELL);
+      for (let cy = c0; cy <= c1; cy++) {
+        if (wallCols(cy) < GATE_MIN_COLS) continue;
+        best = cy * CELL;
+        for (let k = cy; k < cy + 3 && !blocked && wallCols(k) >= GATE_MIN_COLS; k++) {      // walls may be a few rows thick
+          for (let cx = Math.floor(x0 / CELL); cx <= Math.floor(x1 / CELL) && !blocked; cx++)
+            for (let cz = Math.floor(z0 / CELL); cz <= Math.floor(z1 / CELL); cz++) if (vox.has(cx, k, cz)) { blocked = true; break; }
+        }
+        break;
+      }
+    }
+    for (let i = 0; i < fieldN; i++) {
+      const f = fields[i];
+      if (!(f.lvl > 0) || f.y <= front || f.y >= best || f.y - front > GATE_RANGE) continue;
+      if (x1 < f.x0 - 3 || x0 > f.x1 + 3) continue;                    // the field does not span the cat's lane
+      best = f.y; blocked = z0 < f.z1 && f.z0 < z1;
+    }
+    if (best === Infinity || best - front > GATE_RANGE) return null;
+    GATE.y = best; GATE.blocked = blocked;
+    return GATE;
+  }
 
   function addField(e, x, y, t) {
     const f = fields[fieldN] || (fields[fieldN] = {});
@@ -161,6 +202,11 @@ export function createScene(artRef, mk) {
           const d = push(isoDepth(px, py, (za + zb) / 2) - 0.4, T_ALT); d.a = px; d.b = py; d.c = za; d.d = zb;
           za = zb;
         }
+        const gate = game.state === 'play' || game.state === undefined ? findGate(px, py, pz, pb) : null;
+        if (gate) {
+          const dist = gate.y - (py + pb.d / 2), ga = Math.min(1, (GATE_RANGE - dist) / GATE_FADE, dist / 14);
+          if (ga > 0.02) { const d = push(isoDepth(px + pb.w / 2, gate.y - 1, pz + pb.h) + 0.7, T_GATE); d.a = px; d.b = gate.y - 0.5; d.c = pz; d.d = gate.blocked ? 1 : 0; d.e = ga * 0.92; }
+        }
         if (nip) {
           const last = hist[hist.length - 1];
           if (!last || now - last.t > 0.012) hist.push({ x: px, y: py - 9, z: pz + 4, t: now });
@@ -216,6 +262,7 @@ export function createScene(artRef, mk) {
       case T_SHADOW: ctx.beginPath(); spr.shadowPath(ctx, d.a, d.b, d.c, d.d, d.e, d.g, cdx, cdy); ctx.fillStyle = SHADOW; ctx.fill(); break;
       case T_PSHADOW: spr.playerShadow(ctx, d.a, d.b, d.c, d.d, edx, edy, false); break;
       case T_ALT: spr.altSegment(ctx, d.a, d.b, d.c, d.d, edx, edy); break;
+      case T_GATE: spr.gateMarker(ctx, d.a, d.b, d.c, TUNING.playerBox.w, TUNING.playerBox.h, cdx, cdy, d.d === 1, d.e, now); break;
       case T_TRAIL: spr.rainbowTrail(ctx, hist, now, TRAIL_LIFE, cdx, cdy); break;
       default: break;
     }
@@ -225,5 +272,5 @@ export function createScene(artRef, mk) {
   function drawGlow(ctx) {
     for (let i = 0; i < fieldN; i++) { const f = fields[i]; if (f.lvl > 0) spr.strandBloom(ctx, f, now, cdx, cdy, f.glow); }
   }
-  return { draw, drawGlow, reset, stats, get vox() { return vox; } };
+  return { draw, drawGlow, reset, stats, findGate, get vox() { return vox; } };
 }

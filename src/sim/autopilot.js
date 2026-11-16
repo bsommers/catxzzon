@@ -1,6 +1,7 @@
 // Autopilot (qa-bot): plans a path through wall gaps, dodges fields/cans/cheeseballs, shoots, refuels, bombs the boss.
 // Pure and Node-safe; reads game state only. Never touches g.rng (own deterministic PRNG).
 //   const ap = createAutopilot(game, { skill: 0..1 });  ap.input(game, dt) -> { dx, dz, fire, bomb }
+import { createGrid } from './grid.js';
 import { CELL, FIELD_W, TUNING, FIELD_CELLS_X, FIELD_CELLS_Z } from '../core/defs.js';
 
 const PB = TUNING.playerBox;
@@ -39,7 +40,7 @@ export function createAutopilot(game, opts = {}) {
   const rowCache = new Map(); let cacheStage = null;
   const prev = new Map();                 // ent id -> [x,y,z] last tick (for velocity)
   let lastT = -1, lastScroll = 0, scrollV = TUNING.baseSpeed;
-  let planCache = null, lastMove = MOVES[0], hold = { dx: 0, dz: 0 }, holdN = 0, bombCd = 0, lastTarget = null;
+  let questId = 0, planCache = null, lastMove = MOVES[0], hold = { dx: 0, dz: 0 }, holdN = 0, bombCd = 0, lastTarget = null;
   const reactEvery = 1 + Math.round((1 - skill) * 9);
   const horizon = 0.3 + 0.45 * skill;
   const margin = 1.5 + 2.5 * skill;
@@ -87,6 +88,48 @@ export function createAutopilot(game, opts = {}) {
     return out;
   }
 
+  const winOf = (t, slack) => [Math.floor(TUNING.moveX * t * slack / SX), Math.floor(TUNING.moveZ * t * slack / SZ)];
+  /** Backward feasibility over rows[0..K): E[i] = nose-entry positions, X[i] = tail-exit positions (see planGap). */
+  function backward(rows, K, slack, spd) {
+    const D = PB.d - 1.8, IN_T = (CELL + D) / spd;
+    const E = new Array(K), X = new Array(K), win = (t, sl) => winOf(t, sl);
+    const and = (f, d) => { const o = new Uint8Array(NXS * NZS); for (let q = 0; q < o.length; q++) o[q] = f[q] & d[q]; return o; };
+    const [iwx, iwz] = win(IN_T, slack);
+    for (let i = K - 1; i >= 0; i--) {
+      if (i === K - 1) X[i] = rows[i].free;
+      else { const [wx, wz] = win(Math.max(0, (rows[i + 1].cy - rows[i].cy) * CELL - CELL - D) / spd, slack); X[i] = and(rows[i].free, dilate(E[i + 1], wx, wz)); }
+      E[i] = and(rows[i].free, dilate(X[i], iwx, iwz));
+    }
+    return { E, X, iwx, iwz, win };
+  }
+
+  /**
+   * Level audit (player-independent): for every window of up to 4 consecutive blocked rows of `stage`, is there ANY lattice path
+   * through them at scroll speed `spd`, honouring the exact body size and per-tick collisions? Returns [{cy, rows}] of windows that are impossible.
+   */
+  function auditStage(stage, spd = TUNING.baseSpeed, slack = 1) {
+    const grid = createGrid(stage.cells);
+    const fieldsByRow = new Map();
+    for (const f of stage.spawns) {
+      if (f.kind !== 'field' || f.pulse > 0) continue;
+      const w = (f.span || 1) * CELL, x = f.x0 !== undefined ? f.x0 + w / 2 : f.x;
+      const small = f.z1 <= FIELD_CELLS_Z, z0 = small ? f.z0 * CELL : f.z0, z1 = small ? f.z1 * CELL : f.z1;
+      const cy = Math.floor(f.y / CELL);
+      if (!fieldsByRow.has(cy)) fieldsByRow.set(cy, []);
+      fieldsByRow.get(cy).push({ x, w, z: z0, h: Math.max(4, z1 - z0) });
+    }
+    const cys = [...new Set([...grid.rowCys, ...fieldsByRow.keys()])].sort((a, b) => a - b);
+    const free = cys.map((cy) => ({ cy, free: rowFree({ grid }, cy, fieldsByRow.get(cy)) }));
+    const bad = [];
+    for (let i = 0; i < free.length; i++) {
+      const win = free.slice(i, i + 4);
+      if (win.length < 2) continue;
+      const { E } = backward(win, win.length, slack, spd);
+      if (!E[0].some((v) => v)) bad.push({ cy: win[0].cy, y: win[0].cy * CELL, rows: win.map((r) => r.cy) });
+    }
+    return bad;
+  }
+
   function planGap(g, p) {
     const gr = g.grid;
     if (cacheStage !== gr) { rowCache.clear(); cacheStage = gr; }
@@ -111,21 +154,14 @@ export function createAutopilot(game, opts = {}) {
     if (!rows.length) return null;
     const spd = Math.max(scrollV, 30);
     // lattice reach window between row i and i+1 (centre to centre; the body is only inside a row for a short time)
-    const win = (t, slack) => [Math.floor(TUNING.moveX * t * slack / SX), Math.floor(TUNING.moveZ * t * slack / SZ)];
-    const D = PB.d - 1.8, IN_T = (CELL + D) / spd;                      // time the body takes to cross one row
+    const D = PB.d - 1.8;
     const solve = (K, slack) => {
-      // E[i]: feasible positions when the nose enters row i; X[i]: when the tail leaves it (free in row i, reachable on to the next row)
-      const E = new Array(K), X = new Array(K);
-      const and = (f, d) => { const o = new Uint8Array(NXS * NZS); for (let q = 0; q < o.length; q++) o[q] = f[q] & d[q]; return o; };
-      const [iwx, iwz] = win(IN_T, slack);
-      for (let i = K - 1; i >= 0; i--) {
-        if (i === K - 1) X[i] = rows[i].free;
-        else { const [wx, wz] = win(Math.max(0, (rows[i + 1].cy - rows[i].cy) * CELL - CELL - D) / spd, slack); X[i] = and(rows[i].free, dilate(E[i + 1], wx, wz)); }
-        E[i] = and(rows[i].free, dilate(X[i], iwx, iwz));
-      }
+      const { E, X, iwx, iwz, win } = backward(rows, K, slack, spd);
       const chain = [];
       let cx = p.x, cz = p.z;
-      const pick = (set, wx, wz) => {
+      let tin = null;
+      if (g.fuel < 92) for (const e of g.ents) if (!e.dead && e.kind === 'tuna' && e.y - p.y > 20 && e.y - p.y < 320 && (!tin || e.y < tin.y)) tin = e;
+      const pick = (set, wx, wz, wy) => {
         const ax = (wx + 1) * SX, az = (wz + 1) * SZ;
         let best = -1, bv = 1e9;
         for (let a = 0; a < NXS; a++) {
@@ -133,7 +169,8 @@ export function createAutopilot(game, opts = {}) {
           for (let b = 0; b < NZS; b++) {
             if (!set[a * NZS + b]) continue;
             const z = zOf(b); if (Math.abs(z - cz) > az) continue;
-            const v = Math.abs(x - cx) / TUNING.moveX + Math.abs(z - cz) / TUNING.moveZ;
+            let v = Math.abs(x - cx) / TUNING.moveX + Math.abs(z - cz) / TUNING.moveZ;
+            if (tin && wy < tin.y) v += 0.5 * Math.max(0, Math.abs(x - tin.x) - 3) / TUNING.moveX + 0.35 * Math.max(0, z - TUNING.zMin - 3) / TUNING.moveZ;   // line up on a fuel tin when free to
             if (v < bv) { bv = v; best = a * NZS + b; }
           }
         }
@@ -145,9 +182,9 @@ export function createAutopilot(game, opts = {}) {
         const yIn = rows[i].cy * CELL - D / 2, yOut = (rows[i].cy + 1) * CELL + D / 2;
         const tIn = i === 0 ? Math.max(0, yIn - p.y) / spd : Math.max(0, yIn - ((rows[i - 1].cy + 1) * CELL + D / 2)) / spd;
         const [wx, wz] = win(tIn, slack);
-        if (!pick(E[i], wx, wz)) return null;
+        if (!pick(E[i], wx, wz, yIn)) return null;
         chain.push({ y: yIn, x: cx, z: cz });
-        if (!pick(X[i], iwx, iwz)) return null;
+        if (!pick(X[i], iwx, iwz, yOut)) return null;
         chain.push({ y: yOut, x: cx, z: cz });
       }
       return chain;
@@ -165,7 +202,7 @@ export function createAutopilot(game, opts = {}) {
       if (bi < 0) return null;
       chain = [{ y: (rows[0].cy + 1) * CELL + PB.d / 2, x: xOf((bi / NZS) | 0), z: zOf(bi % NZS) }];
     }
-    return { x: chain[0].x, z: chain[0].z, dy: rows[0].cy * CELL - p.y, lock: true, K, chain, rows: rows.map((r) => r.cy) };
+    return { x: chain[0].x, z: chain[0].z, dy: rows[0].cy * CELL - p.y, y0: rows[0].cy * CELL, lock: true, K, chain, rows: rows.map((r) => r.cy) };
   }
 
   // ---------- opportunistic target (no wall near): pickups, fuel tins, enemies ----------
@@ -188,6 +225,23 @@ export function createAutopilot(game, opts = {}) {
     if (!best) return { x: FIELD_W / 2, z: 44, weak: true };
     const pick = best.team === 'n' && best.kind !== 'tuna';
     return { x: best.x, z: clamp(best.z + (pick ? best.h / 2 - PB.h / 2 : best.h / 2 - 3), TUNING.zMin + 2, TUNING.zMax - 8), weak: false };
+  }
+
+  // Detour for a fuel tin between wall rows when there is time to line up, shoot it (ground level) and still make the next gap.
+  function refuelQuest(g, p, gap) {
+    if (g.fuel > 82 && !questId) return null;
+    let tuna = null;
+    for (const e of g.ents) { if (!e.dead && e.kind === 'tuna' && e.y - p.y > 30 && e.y - p.y < 300 && (!tuna || e.y < tuna.y)) tuna = e; }
+    if (!tuna) { questId = 0; return null; }
+    if (gap.y0 !== undefined && tuna.y > gap.y0) { questId = 0; return null; }       // tin lies beyond the wall: not now
+    const spd = Math.max(scrollV, 30), wp = gap.chain[0];
+    const tz = TUNING.zMin + 2;
+    const tA = Math.max(Math.abs(tuna.x - p.x) / TUNING.moveX, Math.abs(tz - p.z) / TUNING.moveZ);
+    const tB = Math.max(Math.abs(wp.x - tuna.x) / TUNING.moveX, Math.abs(wp.z - tz) / TUNING.moveZ);
+    const left = (gap.dy - 12) / spd - (questId === tuna.id ? 0 : 0.25);
+    if (tA + 0.3 + tB > left) { questId = 0; return null; }
+    questId = tuna.id;
+    return { x: tuna.x, z: tz, weak: false, quest: true };
   }
 
   // ---------- hazards ----------
@@ -248,9 +302,10 @@ export function createAutopilot(game, opts = {}) {
   function decide(g, p, dt) {
     let gap;
     if (planCache && g.t - planCache.t < planEvery * DT * 0.99 && g.stageIdx === planCache.stage) gap = planCache.gap;
+    else if (g.stage && g.stage.kind === 'boss' && g.stage.bossY !== undefined && p.y > g.stage.bossY - 260) gap = null;   // arena: side walls only, fight instead
     else { gap = planGap(g, p); planCache = { t: g.t, gap, stage: g.stageIdx }; }
     let tgt;
-    if (gap && gap.dy < 380) tgt = gap;
+    if (gap && gap.dy < 380) { tgt = gap; const q = refuelQuest(g, p, gap); if (q) tgt = q; }
     else tgt = pickTarget(g, p);
     lastTarget = tgt;
     const hz = collectHazards(g, p, dt);
@@ -319,7 +374,7 @@ export function createAutopilot(game, opts = {}) {
     if (prev.size > seen.size + 64) for (const k of prev.keys()) if (!seen.has(k)) prev.delete(k);
   }
 
-  return { input, step: input, update: input, think: input, get skill() { return skill; }, get target() { return lastTarget; }, get unfairRows() { return [...unfair].sort((a, b) => a - b); } };
+  return { input, step: input, update: input, think: input, get skill() { return skill; }, get target() { return lastTarget; }, auditStage, get unfairRows() { return [...unfair].sort((a, b) => a - b); } };
 }
 
 export default createAutopilot;

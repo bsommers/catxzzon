@@ -57,8 +57,10 @@ export function buildFortress(stageIdx, round, seed, def) {
     if (cap && H < NZ) field(cy, 0, NX, H, NZ);
     return cap && H < NZ;
   }
+  const holes = [];                // 1x1 mouse holes: no rocket pads in their approach lane
   function holeFlank(cy, g) {
     if (g.w !== 1 || g.h !== 1) return;
+    holes.push({ y: yc(cy), x: xc(g.gx) });
     if (g.gx > 0 && b.has(g.gx - 1, cy, g.gz)) b.cell(g.gx - 1, cy, g.gz, T.mousehole);
     if (g.gx < NX - 1 && b.has(g.gx + 1, cy, g.gz)) b.cell(g.gx + 1, cy, g.gz, T.mousehole);
   }
@@ -88,7 +90,18 @@ export function buildFortress(stageIdx, round, seed, def) {
     const gzLo = Math.max(0, az - h + 1), gzHi = Math.min(az, NZ - h);
     return { gx: rng.int(gxLo, gxHi), gz: rng.int(gzLo, gzHi), w, h, ax, az };
   }
-  const commit = (g, cy) => { S.ax = g.ax; S.az = g.az; S.pcy = cy; };
+  const anchors = [];              // [cy, ax] of every committed gap: tins are lined up with the lane the player is flying
+  const commit = (g, cy) => { S.ax = g.ax; S.az = g.az; S.pcy = cy; anchors.push([cy, g.ax, g.az]); };
+  const laneZ = (cy) => {   // altitude of the flown lane: a tin there can be shot without diving to the floor (1 in 4 stays on the ground)
+    let az = 3;
+    for (let i = 0; i < anchors.length; i++) if (anchors[i][0] <= cy) az = anchors[i][2];
+    return rng.chance(0.25) ? 0 : clamp(az * CELL + rng.int(0, 3), 0, 100);
+  };
+  const laneX = (cy) => {
+    let ax = 6;
+    for (let i = 0; i < anchors.length; i++) if (anchors[i][0] <= cy) ax = anchors[i][1];
+    return clamp(xc(ax) + rng.int(-6, 6), 20, 204);
+  };
   const wallH = (gaps, want) => {
     let m = want;
     for (const g of gaps) m = Math.max(m, g.gz + g.h);
@@ -114,7 +127,8 @@ export function buildFortress(stageIdx, round, seed, def) {
     const d = diff(cy);
     const y0 = cy * CELL;
     if (y0 - lastTunaY > 420 || rng.chance(0.22)) {
-      const s = groundSpawn('tuna', cy + rng.int(0, n - 1));
+      const ty = cy + (n >= 6 ? rng.int(3, n - 2) : rng.int(0, n - 1));
+      const s = b.spawn(yc(ty), 'tuna', laneX(ty), laneZ(ty));
       lastTunaY = s.y;
     }
     const pads = Math.floor(d * 2.2 + rng.next()) + (heavy ? 2 : 0) - (cy < startCy ? 1 : 0);
@@ -141,7 +155,7 @@ export function buildFortress(stageIdx, round, seed, def) {
     const n = rng.int(3, 5);
     const want = Math.min(4, 2 + Math.floor(d * 2));
     let s = 5;
-    for (let k = 2; k <= 5; k++) if (reach(k, round).rx >= want) { s = k; break; }
+    for (let k = 2; k <= 7; k++) if (reach(k, round).rx >= want) { s = k; break; }
     let sign = rng.chance(0.5) ? 1 : -1;
     let last = cy;
     for (let i = 0; i < n; i++) {
@@ -188,7 +202,7 @@ export function buildFortress(stageIdx, round, seed, def) {
     commit(g, cy);
     const cy2 = cy + rng.int(2, 3);
     if (rng.chance(0.5)) {            // curtain with a vertical slot
-      const sw = d < 0.5 ? 2 : 1;
+      const sw = d < 0.8 || round < 3 ? 2 : 1;
       const sx = clamp(S.ax - rng.int(0, sw - 1), 0, NX - sw);
       field(cy2, 0, sx, 0, NZ, rng.chance(0.3) ? 2.6 : 0);
       field(cy2, sx + sw, NX - sx - sw, 0, NZ);
@@ -347,6 +361,7 @@ export function buildFortress(stageIdx, round, seed, def) {
   // ground spawns must not sit inside voxels
   b.spawns = sp.filter((s) => !((s.kind === 'turret' || s.kind === 'pad' || s.kind === 'tuna' || s.kind === 'radar') && (s.z || 0) === 0 &&
     (b.has(Math.floor(s.x / CELL), Math.floor(s.y / CELL), 0) || b.has(Math.floor(s.x / CELL), Math.floor(s.y / CELL), 1))));
+  b.spawns = b.spawns.filter((s) => !(s.kind === 'pad' && holes.some((h) => s.y > h.y - 280 && s.y < h.y + 24 && Math.abs(s.x - h.x) < 56)));
   const isClear = (q) => q > 2 && q < rows - 2 && !used.has(q) && !used.has(q - 1) && !used.has(q + 1);
   const clearRow = (r, lo, hi) => {
     for (let k = 0; k < 80; k++) {
@@ -366,10 +381,10 @@ export function buildFortress(stageIdx, round, seed, def) {
       let q = -1;
       for (let k = 0; k < 40 && q < 0; k++) for (const c of [Math.floor(ins / CELL) - k, Math.floor(ins / CELL) + k]) if (q < 0 && c * CELL > prev + 60 && c * CELL < prev + 680 && !used.has(c)) q = c;
       if (q < 0) break;
-      b.spawn(yc(q), 'tuna', rng.int(24, 200), 0);
+      b.spawn(yc(q), 'tuna', laneX(q), laneZ(q));
       continue;
     }
-    b.spawn(yc(r), 'tuna', rng.int(24, 200), 0);
+    b.spawn(yc(r), 'tuna', laneX(r), laneZ(r));
   }
   // pickups every ~1200
   const picks = ['yarnpick', 'nip', 'laserpick'];

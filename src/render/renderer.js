@@ -30,6 +30,28 @@ const nowMs = () => (typeof performance !== 'undefined' && performance.now ? per
  * @param {HTMLCanvasElement} canvas
  * @param {{ bus?: any, art?: any, hooks?: false | { drawBackground?, particles?, drawHud?, popups? }, createCanvas?: (w,h)=>any, crt?: boolean }} [opts]
  */
+/**
+ * Bus view handed to render-side listeners (particles, popups). The sim emits synchronously from inside its tick, so
+ * an exception in a cosmetic listener would unwind into game logic: catch it here (warn once per event type).
+ * 'fx' payloads without opts get an empty object, the shape every handler can read.
+ */
+export function guardBus(bus) {
+  const warned = new Set();
+  return {
+    ...bus,
+    on(type, fn) {
+      return bus.on(type, (a, b) => {
+        try {
+          if (type === 'fx' && a && a.opts == null) a = { ...a, opts: {} };
+          fn(a, b);
+        } catch (e) {
+          if (!warned.has(type)) { warned.add(type); console.warn(`[render] "${type}" listener threw (ignored)`, e); }
+        }
+      });
+    },
+  };
+}
+
 export function createRenderer(canvas, opts = {}) {
   const bus = opts.bus || null, mk = opts.createCanvas || defaultCanvasFactory();
   const artRef = { art: null };
@@ -59,12 +81,12 @@ export function createRenderer(canvas, opts = {}) {
     if (!('drawBackground' in given)) { const m = await imp('./background.js'); if (m && typeof m.drawBackground === 'function' && !Hk.drawBackground) Hk.drawBackground = m.drawBackground; }
     if (!('particles' in given) && bus) {
       const m = await imp('./particles.js');
-      if (m && typeof m.createParticles === 'function' && !Hk.particles) try { Hk.particles = m.createParticles(bus, artRef.art); } catch (e) { console.warn('[render] particles failed', e); }
+      if (m && typeof m.createParticles === 'function' && !Hk.particles) try { Hk.particles = m.createParticles(guardBus(bus), artRef.art); } catch (e) { console.warn('[render] particles failed', e); }
     }
     if (!('drawHud' in given) || !('popups' in given)) {
       const m = await imp('../ui/hud.js');
       if (m && typeof m.drawHud === 'function' && !('drawHud' in given) && !Hk.drawHud) Hk.drawHud = m.drawHud;
-      if (m && typeof m.createPopups === 'function' && !('popups' in given) && bus && !Hk.popups) try { Hk.popups = m.createPopups(bus); } catch (e) { console.warn('[render] popups failed', e); }
+      if (m && typeof m.createPopups === 'function' && !('popups' in given) && bus && !Hk.popups) try { Hk.popups = m.createPopups(guardBus(bus)); } catch (e) { console.warn('[render] popups failed', e); }
     }
   })();
   function call(name, c, fn) {

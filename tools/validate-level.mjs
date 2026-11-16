@@ -4,7 +4,14 @@
 import { fileURLToPath } from 'node:url';
 import { buildStage } from '../src/levels/index.js';
 import { STAGES, KINDS, BLOCK_NAMES, CELL, FIELD_W, FIELD_CELLS_X } from '../src/core/defs.js';
-import { NX, NZ, reach, rowBlocks } from '../src/levels/util.js';
+import { NX, NZ, reach, rowBlocks, speedFor } from '../src/levels/util.js';
+import { createAutopilot } from '../src/sim/autopilot.js';
+
+const auditor = createAutopilot({ seed: 1, player: {} }, { skill: 1 });
+/** Required movement slack by round: the path must still exist when the player is only this fraction as fast (25% in round 1 -> 10% in round 4). */
+export const slackFor = (round) => 0.75 + 0.05 * (Math.min(4, Math.max(1, round)) - 1);
+/** Independent body-accurate audit (autopilot.auditStage): windows of wall rows that cannot be flown with the required slack. */
+export function auditLevel(stage, round) { return auditor.auditStage(stage, speedFor(round), slackFor(round)); }
 
 const SPAWN_KINDS = new Set([...Object.keys(KINDS), 'formation']);
 const PATTERNS = new Set(['vee', 'line', 'swoop', 'ring', 'zig']);
@@ -21,7 +28,7 @@ export function checkReachability(stage, round) {
   const nxt = new Uint8Array(NX * NZ);
   for (const cy of cys) {
     const blocked = rows.get(cy);
-    const { rx, rz } = prev < 0 ? { rx: NX, rz: NZ } : reach(cy - prev, round);
+    const { rx, rz } = prev < 0 ? { rx: NX, rz: NZ } : reach(cy - prev, round, 1);
     nxt.fill(0);
     let count = 0;
     for (let z = 0; z < NZ; z++) {
@@ -101,6 +108,9 @@ export function validateStage(stage, stageIdx, round) {
     const r = checkReachability(stage, round);
     info.layers = r.layers; info.minSet = r.minSet;
     if (!r.ok) e(`UNREACHABLE at row ${r.failRow}`);
+    const au = auditLevel(stage, round);
+    info.audit = au.length;
+    if (au.length) e(`AUDIT unfair window(s) at y=${au.slice(0, 4).map((b) => b.y).join(',')}`);
   }
   if (stage.kind === 'space') {   // spuds: <= 4 per 96-unit band and >= 3 cells of lateral room
     const sp = stage.spawns.filter((s) => s.kind === 'spud');

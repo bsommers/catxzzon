@@ -20,12 +20,18 @@ export function speedFor(round) {
   return TUNING.baseSpeed + Math.min(50, TUNING.speedPerRound * Math.max(0, round - 1));
 }
 
-/** How many cells the player can shift (x, z) while flying `rows` cell-rows forward. Conservative (SAFE factor). */
-export function reach(rows, round) {
-  const t = Math.max(0, rows) * CELL / speedFor(round);
+/** Free-flight time (s) between wall row A and wall row B `rows` cell-rows later: the body (depth D) must fully leave A before its nose reaches B. */
+export function freeTime(rows, round) {
+  const D = TUNING.playerBox.d - 1.8;   // effective depth vs voxels (box shrunk 0.9 per side)
+  return Math.max(0, (Math.max(0, rows) - 1) * CELL - D) / speedFor(round);
+}
+
+/** Cells the body can shift (x, z) between two wall-row anchors `rows` apart. Physical: uses only the free-flight time, scaled by `safe`. */
+export function reach(rows, round, safe = SAFE) {
+  const t = freeTime(rows, round);
   return {
-    rx: Math.floor(TUNING.moveX * t * SAFE / CELL),
-    rz: Math.floor(TUNING.moveZ * t * SAFE / CELL),
+    rx: Math.floor(TUNING.moveX * t * safe / CELL),
+    rz: Math.floor(TUNING.moveZ * t * safe / CELL),
   };
 }
 

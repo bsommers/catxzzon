@@ -143,7 +143,7 @@ export function createParticles(bus, art) {
     },
     ring(e, o) {
       const r = (o && o.r) || 30;
-      P(RING, e.x, e.y, e.z, 0, 0, 0, 0.45, r, (o && o.color) !== undefined ? o.color : C.white, 0, O_ADD);
+      P(RING, e.x, e.y, e.z, 0, 0, 0, 0.45, r, o && o.color !== undefined ? o.color : C.white, 0, O_ADD);
       P(RING, e.x, e.y, e.z, 0, 0, 0, 0.6, r * 0.7, C.yellow, 0, { add: true, v: 1 });
     },
     trail(e, o) {

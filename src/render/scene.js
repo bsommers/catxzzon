@@ -50,7 +50,8 @@ export function createScene(artRef, mk) {
   /**
    * Nearest obstacle plane within GATE_RANGE ahead of the cat box (x,y,z = box bottom centre): a wall-like voxel row
    * or a live field overlapping the cat's x. Fills GATE { y, blocked } and returns it, or null when the way is open.
-   * Uses the sim's collision box (TUNING.playerBox, 1 unit of grace) so "mint" really means "fits".
+   * Mirrors the sim: voxels use the box shrunk by 1 unit per side with open intervals (player.js SHRINK / grid.boxHit),
+   * fields use the full box (player.js playerTouches), so "mint" really means "fits".
    */
   function findGate(x, y, z, pb) {
     const front = y + pb.d / 2, x0 = x - pb.w / 2 + 1, x1 = x + pb.w / 2 - 1, z0 = z + 1, z1 = z + pb.h - 1;
@@ -61,8 +62,8 @@ export function createScene(artRef, mk) {
         if (wallCols(cy) < GATE_MIN_COLS) continue;
         best = cy * CELL;
         for (let k = cy; k < cy + 3 && !blocked && wallCols(k) >= GATE_MIN_COLS; k++) {      // walls may be a few rows thick
-          for (let cx = Math.floor(x0 / CELL); cx <= Math.floor(x1 / CELL) && !blocked; cx++)
-            for (let cz = Math.floor(z0 / CELL); cz <= Math.floor(z1 / CELL); cz++) if (vox.has(cx, k, cz)) { blocked = true; break; }
+          for (let cx = Math.floor(x0 / CELL); cx <= Math.ceil(x1 / CELL) - 1 && !blocked; cx++)
+            for (let cz = Math.floor(z0 / CELL); cz <= Math.ceil(z1 / CELL) - 1; cz++) if (vox.has(cx, k, cz)) { blocked = true; break; }
         }
         break;
       }
@@ -70,8 +71,8 @@ export function createScene(artRef, mk) {
     for (let i = 0; i < fieldN; i++) {
       const f = fields[i];
       if (!(f.lvl > 0) || f.y <= front || f.y >= best || f.y - front > GATE_RANGE) continue;
-      if (x1 < f.x0 - 3 || x0 > f.x1 + 3) continue;                    // the field does not span the cat's lane
-      best = f.y; blocked = z0 < f.z1 && f.z0 < z1;
+      if (!(x + pb.w / 2 > f.x0 - 3 && x - pb.w / 2 < f.x1 + 3)) continue;   // the field does not span the cat's lane
+      best = f.y; blocked = z < f.z1 && f.z0 < z + pb.h;
     }
     if (best === Infinity || best - front > GATE_RANGE) return null;
     GATE.y = best; GATE.blocked = blocked;

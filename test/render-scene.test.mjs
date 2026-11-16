@@ -10,7 +10,7 @@ import { PixBuf } from '../src/art/pixbuf.js';
 import { buildVoxelIndex, isoDepth, lightLevel } from '../src/render/blocks.js';
 import { spriteTopLeft, CENTER_ANCHORS, catFrame, frameOf, fieldGeom, fieldLevel, strandZ } from '../src/render/sprites.js';
 import { createScene } from '../src/render/scene.js';
-import { createRenderer } from '../src/render/renderer.js';
+import { createRenderer, guardBus } from '../src/render/renderer.js';
 import { makeDemoGame } from '../src/render/demo.js';
 
 // ---------------------------------------------------------------------------------------------------- helpers
@@ -248,6 +248,11 @@ test('gate reticle: reports the next wall plane and whether the cat box fits thr
   assert.equal(scene.findGate(112, 48, 100, PB).blocked, false, 'over the top');
   assert.equal(scene.findGate(101, 48, 40, PB).blocked, false, 'box edge just inside the window (x 97..105)');
   assert.equal(scene.findGate(99, 48, 40, PB).blocked, true, 'box edge clips the jamb (x 95..103)');
+  assert.equal(scene.findGate(124, 48, 40, PB).blocked, false, 'touching the right jamb (x1 = 128) is not a hit: the sim uses open intervals');
+  assert.equal(scene.findGate(125, 48, 40, PB).blocked, true);
+  assert.equal(scene.findGate(112, 48, 57, PB).blocked, false, 'touching the lintel (z1 = 64) is not a hit');
+  assert.equal(scene.findGate(112, 48, 31, PB).blocked, false, 'touching the sill (z0 = 32)');
+  assert.equal(scene.findGate(112, 48, 30.5, PB).blocked, true);
   const tower = scene.findGate(20, 48, 20, PB);
   assert.equal(tower.y, 10 * CELL, 'a 3-column tower is not a wall: the reticle skips to the real wall');
   assert.equal(scene.findGate(112, -200, 40, PB), null, 'nothing within range');
@@ -276,7 +281,13 @@ test('gate reticle: a live cheese field in the lane comes first; switched off or
   g = s.scene.findGate(112, 48, 70, PB);
   assert.equal(g.y, 100);
   assert.equal(g.blocked, false, 'over the ropes');
+  assert.equal(s.scene.findGate(112, 48, 60, PB).blocked, false, 'touching the top of the band is not a hit (strict <, like playerTouches)');
+  assert.equal(s.scene.findGate(112, 48, 59.5, PB).blocked, true, 'fields use the full box, no grace');
+  assert.equal(s.scene.findGate(112, 48, 22, PB).blocked, false);
+  assert.equal(s.scene.findGate(112, 48, 22.5, PB).blocked, true);
   assert.equal(s.scene.findGate(200, 48, 40, PB).y, 160, 'field does not span this lane');
+  assert.equal(s.scene.findGate(148, 48, 40, PB).y, 100, 'box edge inside the field width (x 80..144)');
+  assert.equal(s.scene.findGate(149, 48, 40, PB).y, 160, 'box edge only touching the field width');
   field.on = false; s.draw();
   assert.equal(s.scene.findGate(112, 48, 40, PB).y, 160, 'field is off: next obstacle is the wall');
   field.on = true; field.y = 400; s.draw();
@@ -359,4 +370,44 @@ test('renderer: shake / flash / hit-stop events, CRT toggle, shot()', async () =
   for (let i = 0; i < 14; i++) frame();
   assert.equal(r.fx.hitstop, 0, 'and resumes afterwards');
   assert.notEqual(r.stats.scene.dyn, before);
+});
+
+test('guardBus: a throwing render listener never unwinds into the emitter; fx payloads always carry opts', async () => {
+  const bus = createBus(), safe = guardBus(bus), seen = [];
+  const off = safe.on('fx', (p) => { seen.push(p); if (p.type === 'bad') throw new Error('cosmetic listener exploded'); });
+  const payload = { type: 'ring', x: 1, y: 2, z: 3 };
+  const out = await quiet(() => {
+    bus.emit('fx', payload);
+    bus.emit('fx', { type: 'bad' });
+    bus.emit('fx', { type: 'bad' });
+    bus.emit('fx', { type: 'boom_small', opts: { n: 3 } });
+  });
+  assert.equal(seen.length, 4);
+  assert.deepEqual(seen[0].opts, {}, 'missing opts are filled in for the listener');
+  assert.equal('opts' in payload, false, 'the shared payload object is not mutated');
+  assert.deepEqual(seen[3].opts, { n: 3 });
+  assert.equal(out.warns.length, 1, 'warned once per event type');
+  off();
+  bus.emit('fx', { type: 'ring' });
+  assert.equal(seen.length, 4, 'unsubscribe still works through the guard');
+  assert.equal(typeof safe.emit, 'function');
+});
+
+test('renderer: real particle / popup hooks survive sim events without opts (boss death emits fx ring with none)', async () => {
+  const mk = mockFactory(), bus = createBus();
+  const r = createRenderer(mk(VIEW.W, VIEW.H), { bus, art: noArt(), createCanvas: mk });
+  await r.ready;
+  const g = makeDemoGame({ stage: 'boss', bus, juice: false });
+  const out = await quiet(() => {
+    for (const type of ['ring', 'boom_small', 'boom_big', 'crumbs', 'spark', 'smoke', 'splat', 'confetti', 'no_such_fx']) {
+      bus.emit('fx', { type, x: 100, y: 200, z: 30 });
+      bus.emit('fx', { type, x: 100, y: 200, z: 30, opts: undefined });
+      bus.emit('fx', { type });
+    }
+    bus.emit('fx', null); bus.emit('fx', undefined);
+    bus.emit('popup', { text: '500', x: 100, y: 200, z: 30 }); bus.emit('popup', null); bus.emit('popup', {});
+    let ms = 0;
+    for (let i = 0; i < 40; i++) { g.step(1 / 60); r.draw(g, 0.3, (ms += 16.7)); }
+  });
+  assert.deepEqual(out.errors, []);
 });

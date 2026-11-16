@@ -269,7 +269,7 @@ export function createAutopilot(game, opts = {}) {
     const steps = Math.max(3, Math.round(T * 20)), h = T / steps;
     let x = p.x, z = p.z, cost = 0, trk = 0;
     const half = Math.max(1, steps >> 1);
-    const hw = PB.w / 2 + margin, hd = PB.d / 2 + margin * 0.5, hh = PB.h + margin;
+    const hw = PB.w / 2 + margin, hd = PB.d / 2 + margin * 0.5;
     for (let k = 1; k <= steps; k++) {
       const m = k <= half ? m1 : m2;
       let mx = m[0], mz = m[1];

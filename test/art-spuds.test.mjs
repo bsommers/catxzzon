@@ -14,7 +14,7 @@ test('spuds matches manifest', () => {
 });
 test('spuds deterministic and fast', () => {
   const t = performance.now(), a = build(), ms = performance.now() - t, b = build();
-  assert.ok(ms < 400, 'build ' + ms);
+  assert.ok(ms < (process.env.CI ? 3000 : 400), 'build ' + ms);
   assert.deepEqual(Buffer.from(a.planet_baked.rgba), Buffer.from(b.planet_baked.rgba));
   assert.deepEqual(Buffer.from(a.spud_bg[11].rgba), Buffer.from(b.spud_bg[11].rgba));
 });

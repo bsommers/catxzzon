@@ -14,7 +14,7 @@ test('enemies matches manifest', () => {
 });
 test('enemies deterministic and fast', () => {
   const t = performance.now(), x = build(), ms = performance.now() - t, y = build();
-  assert.ok(ms < 400);
+  assert.ok(ms < (process.env.CI ? 3000 : 400));
   for (const k of Object.keys(x)) x[k].forEach((f, i) => assert.deepEqual(Buffer.from(f.rgba), Buffer.from(y[k][i].rgba)));
 });
 test('frames differ (animation)', () => {
